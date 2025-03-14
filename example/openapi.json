@@ -1,0 +1,281 @@
+{
+  "components": {
+    "schemas": {
+      "GithubComZboycoEasyginError": {
+        "properties": {
+          "code": {
+            "description": "错误码",
+            "type": "integer"
+          },
+          "desc": {
+            "description": "错误描述",
+            "type": "string"
+          },
+          "msg": {
+            "description": "错误信息",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "msg",
+          "desc"
+        ],
+        "type": "object"
+      },
+      "GithubComZboycoEasyginExampleApisUserReqCreateUser": {
+        "properties": {
+          "age": {
+            "description": "User Age",
+            "type": "integer"
+          },
+          "name": {
+            "description": "User Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "age"
+        ],
+        "type": "object"
+      },
+      "GithubComZboycoEasyginExampleApisUserReqUploadFile": {
+        "properties": {
+          "file": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MimeMultipartFileHeader"
+              }
+            ],
+            "description": "Upload File"
+          },
+          "images": {
+            "description": "Upload Images",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/MimeMultipartFileHeader"
+                }
+              ]
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "type": "object"
+      },
+      "GithubComZboycoEasyginExampleApisUserRespGetUser": {
+        "properties": {
+          "id": {
+            "description": "User ID",
+            "type": "integer"
+          },
+          "name": {
+            "description": "User Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "MimeMultipartFileHeader": {
+        "format": "binary",
+        "type": "string"
+      }
+    }
+  },
+  "info": {
+    "title": "RESTful API",
+    "version": ""
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/server/user": {
+      "get": {
+        "parameters": [
+          {
+            "description": "User Name",
+            "in": "query",
+            "name": "name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User Min Age",
+            "in": "query",
+            "name": "ageMin",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisUserRespGetUser"
+                      }
+                    ]
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Response with status code 200"
+          },
+          "default": {
+            "description": ""
+          }
+        },
+        "summary": "Get user list"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisUserReqCreateUser"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Response with status code 204"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/GithubComZboycoEasyginError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Response with status code 400"
+          },
+          "default": {
+            "description": ""
+          }
+        },
+        "summary": "Create user"
+      }
+    },
+    "/server/user/file": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisUserReqUploadFile"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Response with status code 204"
+          },
+          "default": {
+            "description": ""
+          }
+        },
+        "summary": "Upload file"
+      }
+    },
+    "/server/user/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "User token",
+            "in": "header",
+            "name": "Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "User ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisUserRespGetUser"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Response with status code 200"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/GithubComZboycoEasyginError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Response with status code 401"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/GithubComZboycoEasyginError"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Response with status code 404"
+          },
+          "default": {
+            "description": ""
+          }
+        },
+        "summary": "Get user info"
+      }
+    }
+  }
+}
