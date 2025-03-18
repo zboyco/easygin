@@ -488,7 +488,17 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 	case reflect.Map:
 		// 处理 Map 类型
 		schema = openapi3.NewObjectSchema()
-		// 可以添加额外的 Map 类型处理逻辑
+		// 如果键类型不是字符串，记录警告（OpenAPI 中 Map 的键必须是字符串）
+		if t.Key().Kind() != reflect.String {
+			// 这里可以添加日志警告，但我们仍然尝试处理值类型
+			panic("OpenAPI map keys must be strings due to a JSON limitation.")
+		}
+		// 使用 additionalProperties 表示 Map 的值类型
+		schema.AdditionalProperties = openapi3.AdditionalProperties{
+			Schema: &openapi3.SchemaRef{
+				Value: generateSchema(doc, t.Elem(), isMultipart),
+			},
+		}
 	case reflect.Interface:
 		// 处理接口类型
 		schema = openapi3.NewObjectSchema()
