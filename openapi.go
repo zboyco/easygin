@@ -485,6 +485,22 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 		schema.Items = &openapi3.SchemaRef{
 			Value: generateSchema(doc, t.Elem(), isMultipart),
 		}
+	case reflect.Map:
+		// 处理 Map 类型
+		schema = openapi3.NewObjectSchema()
+		// 可以添加额外的 Map 类型处理逻辑
+	case reflect.Interface:
+		// 处理接口类型
+		schema = openapi3.NewObjectSchema()
+		// 接口类型无法确定具体结构，使用通用对象
+	default:
+		// 默认情况下返回一个字符串类型
+		schema = openapi3.NewStringSchema()
+	}
+
+	// 确保始终返回一个非nil的schema
+	if schema == nil {
+		schema = openapi3.NewObjectSchema()
 	}
 
 	return schema
