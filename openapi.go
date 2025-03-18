@@ -474,7 +474,7 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 		}
 	case reflect.String:
 		schema = openapi3.NewStringSchema()
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		schema = openapi3.NewIntegerSchema()
 	case reflect.Float32, reflect.Float64:
 		schema = openapi3.NewFloat64Schema()
@@ -496,11 +496,6 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 	default:
 		// 默认情况下返回一个字符串类型
 		schema = openapi3.NewStringSchema()
-	}
-
-	// 确保始终返回一个非nil的schema
-	if schema == nil {
-		schema = openapi3.NewObjectSchema()
 	}
 
 	return schema
