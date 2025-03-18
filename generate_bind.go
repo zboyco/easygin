@@ -11,30 +11,58 @@ import (
 )
 
 func GenerateParametersBindFunction(groups ...*RouterGroup) error {
+	if len(groups) == 0 {
+		return fmt.Errorf("no router groups provided")
+	}
+
 	// 按包路径分组API
 	apisByPkg := make(map[string][]RouterHandler)
 
 	for _, group := range groups {
+		if group == nil {
+			fmt.Println("Warning: nil router group provided")
+			continue
+		}
+
 		apis, err := processRouterGroup(group)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to process router group: %v", err)
+		}
+
+		if len(apis) == 0 {
+			fmt.Printf("Warning: no APIs found in router group: %v\n", group)
+			continue
 		}
 
 		// 按包路径分组
 		for _, api := range apis {
+			if api == nil {
+				fmt.Println("Warning: nil API found after processing router group")
+				continue
+			}
+
 			apiType := reflect.TypeOf(api)
 			if apiType.Kind() == reflect.Ptr {
 				apiType = apiType.Elem()
 			}
 			pkgPath := apiType.PkgPath()
+			if pkgPath == "" {
+				return fmt.Errorf("empty package path for API: %v", api)
+			}
+
 			apisByPkg[pkgPath] = append(apisByPkg[pkgPath], api)
 		}
 	}
 
+	if len(apisByPkg) == 0 {
+		return fmt.Errorf("no APIs found in any router group")
+	}
+
 	// 为每个包生成zz_easygin_generated.go文件
 	for pkgPath, apis := range apisByPkg {
+		fmt.Printf("Generating file for package: %s with %d APIs\n", pkgPath, len(apis))
 		if err := generateFileForPackage(pkgPath, apis); err != nil {
-			return err
+			return fmt.Errorf("failed to generate file for package %s: %v", pkgPath, err)
 		}
 	}
 
@@ -505,18 +533,6 @@ func processRouterGroup(group *RouterGroup) ([]RouterHandler, error) {
 	return allAPIs, nil
 }
 
-// 为指定包生成zz_easygin_generated.go文件
-// ...
-
-// getPkgDir 获取包所在的目录
-func getPkgDir(pkgPath string) string {
-	gopath := os.Getenv("GOPATH")
-	if gopath == "" {
-		gopath = filepath.Join(os.Getenv("HOME"), "go")
-	}
-	return filepath.Join(gopath, "src", pkgPath)
-}
-
 // generateFileContent 生成文件内容
 func generateFileContent(pkgPath string, apis []RouterHandler) string {
 	var builder strings.Builder
@@ -551,6 +567,9 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 		"github.com/zboyco/easygin",
 	}
 
+	// 添加字段类型的包
+	externalTypeImports := make(map[string]bool)
+
 	// 为每个API生成Parse方法并检查使用的包
 	var parseMethods strings.Builder
 	for _, api := range apis {
@@ -567,31 +586,24 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 		// 检查使用的包
 		if strings.Contains(method, "errors.") {
 			usedImports["errors"] = true
-			method = strings.ReplaceAll(method, "errors.", "")
 		}
 		if strings.Contains(method, "fmt.") {
 			usedImports["fmt"] = true
-			method = strings.ReplaceAll(method, "fmt.", "")
 		}
 		if strings.Contains(method, "json.") {
 			usedImports["encoding/json"] = true
-			method = strings.ReplaceAll(method, "json.", "")
 		}
 		if strings.Contains(method, "strconv.") {
 			usedImports["strconv"] = true
-			method = strings.ReplaceAll(method, "strconv.", "")
 		}
 		if strings.Contains(method, "time.") {
 			usedImports["time"] = true
-			method = strings.ReplaceAll(method, "time.", "")
 		}
 		if strings.Contains(method, "strings.") {
 			usedImports["strings"] = true
-			method = strings.ReplaceAll(method, "strings.", "")
 		}
 		if strings.Contains(method, "reflect.") {
 			usedImports["reflect"] = true
-			method = strings.ReplaceAll(method, "reflect.", "")
 		}
 		if strings.Contains(method, "easygin.") {
 			usedImports["github.com/zboyco/easygin"] = true
@@ -599,8 +611,10 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 		}
 		if strings.Contains(method, "gin.") {
 			usedImports["github.com/gin-gonic/gin"] = true
-			method = strings.ReplaceAll(method, "gin.", "")
 		}
+
+		// 检查外部包的使用
+		collectExternalPackages(method, apiType, externalTypeImports)
 	}
 
 	// 写入导入
@@ -614,6 +628,15 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 			builder.WriteString(fmt.Sprintf("\t\"%s\"\n", pkg))
 		}
 	}
+
+	// 添加外部类型的包
+	if len(externalTypeImports) > 0 {
+		builder.WriteString("\n")
+		for pkg := range externalTypeImports {
+			builder.WriteString(fmt.Sprintf("\t\"%s\"\n", pkg))
+		}
+	}
+
 	builder.WriteString(")\n\n")
 
 	// 写入生成的Parse方法
@@ -622,23 +645,44 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 	return builder.String()
 }
 
-// 为指定包生成z_generated.go文件
+// generateFileForPackage 为指定包生成文件
 func generateFileForPackage(pkgPath string, apis []RouterHandler) error {
-	if len(apis) == 0 {
-		return nil
+	// 获取包所在的目录
+	gopath := os.Getenv("GOPATH")
+	if gopath == "" {
+		// 如果GOPATH为空，尝试使用默认路径
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %v", err)
+		}
+		gopath = filepath.Join(homeDir, "go")
 	}
 
-	pkgDir := getPkgDir(pkgPath)
-	filePath := filepath.Join(pkgDir, "zz_easygin_generated.go")
+	pkgDir := filepath.Join(gopath, "src", pkgPath)
+	if _, err := os.Stat(pkgDir); os.IsNotExist(err) {
+		return fmt.Errorf("package directory not found: %s", pkgDir)
+	}
 
 	// 生成文件内容
 	content := generateFileContent(pkgPath, apis)
+	if content == "" {
+		return fmt.Errorf("generated empty content for package: %s", pkgPath)
+	}
+
+	// 写入文件
+	filePath := filepath.Join(pkgDir, "zz_easygin_generated.go")
+
+	// 确保目录存在
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		return fmt.Errorf("failed to create directory: %s, error: %v", filepath.Dir(filePath), err)
+	}
 
 	// 写入文件
 	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
-		return fmt.Errorf("write file failed: %v", err)
+		return fmt.Errorf("failed to write file: %s, error: %v", filePath, err)
 	}
 
+	fmt.Printf("Successfully generated file: %s\n", filePath)
 	return nil
 }
 
@@ -647,35 +691,43 @@ func generateTypeConversion(builder *strings.Builder, fieldName, valName, paramN
 	// 获取底层类型
 	underlyingKind := fieldType.Kind()
 
+	// 检查是否是外部包的类型
+	typeName := fieldType.Name()
+	if fieldType.PkgPath() != "" && !isBuiltinType(fieldType) {
+		// 使用完整的包路径.类型名
+		pkgName := filepath.Base(fieldType.PkgPath())
+		typeName = pkgName + "." + typeName
+	}
+
 	// 根据底层类型生成转换代码
 	switch underlyingKind {
 	case reflect.String:
 		// 对于字符串类型的别名，直接赋值
-		builder.WriteString(indent + fmt.Sprintf("%s = %s(%s)\n", fieldName, fieldType.Name(), valName))
+		builder.WriteString(indent + fmt.Sprintf("%s = %s(%s)\n", fieldName, typeName, valName))
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		builder.WriteString(indent + fmt.Sprintf("intVal, err := strconv.ParseInt(%s, 10, 64)\n", valName))
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
-		builder.WriteString(indent + fmt.Sprintf("%s = %s(intVal)\n", fieldName, fieldType.Name()))
+		builder.WriteString(indent + fmt.Sprintf("%s = %s(intVal)\n", fieldName, typeName))
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		builder.WriteString(indent + fmt.Sprintf("uintVal, err := strconv.ParseUint(%s, 10, 64)\n", valName))
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
-		builder.WriteString(indent + fmt.Sprintf("%s = %s(uintVal)\n", fieldName, fieldType.Name()))
+		builder.WriteString(indent + fmt.Sprintf("%s = %s(uintVal)\n", fieldName, typeName))
 	case reflect.Float32, reflect.Float64:
 		builder.WriteString(indent + fmt.Sprintf("floatVal, err := strconv.ParseFloat(%s, 64)\n", valName))
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
-		builder.WriteString(indent + fmt.Sprintf("%s = %s(floatVal)\n", fieldName, fieldType.Name()))
+		builder.WriteString(indent + fmt.Sprintf("%s = %s(floatVal)\n", fieldName, typeName))
 	case reflect.Bool:
 		builder.WriteString(indent + fmt.Sprintf("boolVal, err := strconv.ParseBool(%s)\n", valName))
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
-		builder.WriteString(indent + fmt.Sprintf("%s = %s(boolVal)\n", fieldName, fieldType.Name()))
+		builder.WriteString(indent + fmt.Sprintf("%s = %s(boolVal)\n", fieldName, typeName))
 	default:
 		// 对于其他类型，使用通用的转换方法
 		generateValueConversionForType(builder, fieldName, valName, paramName, fieldType, indent)
@@ -743,5 +795,83 @@ func isDefaultValueValid(defaultValue string, fieldType reflect.Type) bool {
 			return err == nil
 		}
 	}
+	return false
+}
+
+// collectExternalPackages 收集结构体中所有字段的外部包
+func collectExternalPackages(method string, t reflect.Type, imports map[string]bool) {
+	if t == nil {
+		fmt.Println("Warning: nil type passed to collectExternalPackages")
+		return
+	}
+
+	if t.Kind() != reflect.Struct {
+		fmt.Printf("Warning: non-struct type passed to collectExternalPackages: %v\n", t)
+		return
+	}
+
+	// 检查方法中是否包含特定类型的引用
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		// 处理嵌入字段
+		if field.Anonymous {
+			embedType := field.Type
+			if embedType.Kind() == reflect.Ptr {
+				embedType = embedType.Elem()
+			}
+			if embedType.Kind() == reflect.Struct {
+				collectExternalPackages(method, embedType, imports)
+			}
+			continue
+		}
+
+		// 检查字段类型
+		fieldType := field.Type
+		if fieldType.Kind() == reflect.Ptr {
+			fieldType = fieldType.Elem()
+		}
+
+		// 如果是外部包的类型，添加到imports
+		if fieldType.PkgPath() != "" && fieldType.PkgPath() != t.PkgPath() {
+			pkgName := filepath.Base(fieldType.PkgPath())
+			typeName := pkgName + "." + fieldType.Name()
+
+			// 检查方法中是否包含该类型的引用
+			if strings.Contains(method, typeName) {
+				imports[fieldType.PkgPath()] = true
+			}
+		}
+
+		// 如果是结构体，递归检查
+		if fieldType.Kind() == reflect.Struct {
+			collectExternalPackages(method, fieldType, imports)
+		}
+	}
+}
+
+// 判断是否是内置类型
+func isBuiltinType(t reflect.Type) bool {
+	// 内置类型没有包路径
+	if t.PkgPath() == "" {
+		return true
+	}
+
+	// 检查是否是标准库中的类型
+	stdLibPrefixes := []string{
+		"time",
+		"encoding",
+		"fmt",
+		"strconv",
+		"strings",
+		"errors",
+	}
+
+	for _, prefix := range stdLibPrefixes {
+		if strings.HasPrefix(t.PkgPath(), prefix) {
+			return true
+		}
+	}
+
 	return false
 }
