@@ -32,6 +32,11 @@ func (r *CreateUser) EasyGinBindParameters(c *gin.Context) error {
 }
 
 func (r *UploadFile) EasyGinBindParameters(c *gin.Context) error {
+	// 实例化 Body
+	if r.Body == nil {
+		r.Body = &ReqUploadFile{}
+	}
+
 	// 绑定multipart表单数据
 	if err := c.Request.ParseMultipartForm(1 << 30); err != nil {
 		return err

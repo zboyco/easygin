@@ -14,7 +14,7 @@ func init() {
 
 type UploadFile struct {
 	easygin.MethodPost `summary:"Upload file"`
-	Body               ReqUploadFile `in:"body" mime:"multipart"`
+	Body               *ReqUploadFile `in:"body" mime:"multipart"`
 }
 
 type ReqUploadFile struct {

@@ -3,6 +3,7 @@ package easygin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -24,6 +25,8 @@ func Ptr[T any](v T) *T {
 }
 
 func GenerateOpenAPI(groups ...*RouterGroup) error {
+	fmt.Println("Generating file for OpenAPI specification...")
+
 	// 创建 OpenAPI 规范文档
 	paths := openapi3.Paths{}
 	doc := &openapi3.T{
@@ -50,7 +53,13 @@ func GenerateOpenAPI(groups ...*RouterGroup) error {
 		return err
 	}
 
-	return os.WriteFile("openapi.json", docBytes, 0o644)
+	if err = os.WriteFile("openapi.json", docBytes, 0o644); err != nil {
+		return err
+	}
+
+	fmt.Println("Successfully generated file openapi.json.")
+
+	return nil
 }
 
 func snakeToPascalCase(s string) string {

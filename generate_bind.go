@@ -70,14 +70,14 @@ func GenerateParametersBindFunction(groups ...*RouterGroup) error {
 }
 
 // generateBindParametersMethod 生成BindParameters方法
-func generateBindParametersMethod(t reflect.Type) string {
+func generateBindParametersMethod(t reflect.Type, currentPkgPath string) string {
 	var builder strings.Builder
 
 	// 写入方法签名
 	builder.WriteString(fmt.Sprintf("func (r *%s) EasyGinBindParameters(c *gin.Context) error {\n", t.Name()))
 
 	// 处理所有字段
-	processAllFields(&builder, t, "r")
+	processAllFields(&builder, t, "r", currentPkgPath)
 
 	// 返回nil
 	builder.WriteString("\treturn nil\n")
@@ -87,7 +87,7 @@ func generateBindParametersMethod(t reflect.Type) string {
 }
 
 // processAllFields 处理所有字段，包括嵌入字段
-func processAllFields(builder *strings.Builder, t reflect.Type, prefix string) {
+func processAllFields(builder *strings.Builder, t reflect.Type, prefix string, currentPkgPath string) {
 	// 处理所有字段
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
@@ -103,10 +103,10 @@ func processAllFields(builder *strings.Builder, t reflect.Type, prefix string) {
 				// 检查是否有in:"body"标签
 				if inTag == "body" {
 					// 如果有in:"body"，调用generateBodyBinding处理
-					generateBodyBinding(builder, fmt.Sprintf("%s.%s", prefix, field.Name), field)
+					generateBodyBinding(builder, fmt.Sprintf("%s.%s", prefix, field.Name), field, currentPkgPath)
 				} else {
 					// 递归处理嵌入字段
-					processAllFields(builder, embedType, prefix)
+					processAllFields(builder, embedType, prefix, currentPkgPath)
 				}
 			} else {
 				// 如果是普通类型字段，按照普通字段逻辑处理
@@ -126,7 +126,7 @@ func processAllFields(builder *strings.Builder, t reflect.Type, prefix string) {
 				case "header":
 					generateHeaderBinding(builder, fieldName, name, field)
 				case "body":
-					generateBodyBinding(builder, fieldName, field)
+					generateBodyBinding(builder, fieldName, field, currentPkgPath)
 				}
 			}
 			continue
@@ -156,7 +156,7 @@ func processAllFields(builder *strings.Builder, t reflect.Type, prefix string) {
 		case "header":
 			generateHeaderBinding(builder, fieldName, name, field)
 		case "body":
-			generateBodyBinding(builder, fieldName, field)
+			generateBodyBinding(builder, fieldName, field, currentPkgPath)
 		}
 	}
 }
@@ -304,8 +304,37 @@ func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string
 }
 
 // generateBodyBinding 生成请求体绑定代码
-func generateBodyBinding(builder *strings.Builder, fieldName string, field reflect.StructField) {
+func generateBodyBinding(builder *strings.Builder, fieldName string, field reflect.StructField, currentPkgPath string) {
 	mime := field.Tag.Get("mime")
+
+	// 检查字段类型是否为指针，如果是则添加实例化代码
+	if field.Type.Kind() == reflect.Ptr {
+		elemType := field.Type.Elem()
+		typeName := elemType.Name()
+
+		// 如果是外部包的类型，需要加上包名
+		if elemType.PkgPath() != currentPkgPath && !isBuiltinType(elemType) {
+			// 获取包名（最后一个斜杠后的部分）
+			pkgName := filepath.Base(elemType.PkgPath())
+
+			// 使用完整的包名.类型名
+			typeName = pkgName + "." + typeName
+
+			// 创建一个临时的方法字符串，确保包含类型名称
+			// 这样在后续的collectExternalPackages中能够检测到这个类型的使用
+			tempMethod := fmt.Sprintf("temp function using %s", typeName)
+
+			// 创建一个临时的imports映射，用于收集外部包
+			tempImports := make(map[string]bool)
+			collectExternalPackages(tempMethod, elemType, tempImports)
+		}
+
+		builder.WriteString(fmt.Sprintf("\t// 实例化 %s\n", strings.TrimPrefix(fieldName, "r.")))
+		builder.WriteString(fmt.Sprintf("\tif %s == nil {\n", fieldName))
+		builder.WriteString(fmt.Sprintf("\t\t%s = &%s{}\n", fieldName, typeName))
+		builder.WriteString("\t}\n\n")
+	}
+
 	if mime == "multipart" {
 		builder.WriteString("\t// 绑定multipart表单数据\n")
 		builder.WriteString("\tif err := c.Request.ParseMultipartForm(1 << 30); err != nil {\n")
@@ -333,7 +362,14 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 		builder.WriteString("\t{\n") // 添加代码块开始
 		builder.WriteString("\t\t// 绑定JSON请求体\n")
 		builder.WriteString("\t\tdecoder := json.NewDecoder(c.Request.Body)\n")
-		builder.WriteString(fmt.Sprintf("\t\tif err := decoder.Decode(&%s); err != nil {\n", fieldName))
+
+		// 根据字段类型是否为指针决定是否添加&符号
+		if field.Type.Kind() == reflect.Ptr {
+			builder.WriteString(fmt.Sprintf("\t\tif err := decoder.Decode(%s); err != nil {\n", fieldName))
+		} else {
+			builder.WriteString(fmt.Sprintf("\t\tif err := decoder.Decode(&%s); err != nil {\n", fieldName))
+		}
+
 		builder.WriteString("\t\t\treturn err\n")
 		builder.WriteString("\t\t}\n")
 
@@ -579,7 +615,7 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 		}
 
 		// 生成Parse方法
-		method := generateBindParametersMethod(apiType)
+		method := generateBindParametersMethod(apiType, pkgPath)
 		parseMethods.WriteString(method)
 		parseMethods.WriteString("\n\n")
 
@@ -682,7 +718,7 @@ func generateFileForPackage(pkgPath string, apis []RouterHandler) error {
 		return fmt.Errorf("failed to write file: %s, error: %v", filePath, err)
 	}
 
-	fmt.Printf("Successfully generated file: %s\n", filePath)
+	fmt.Printf("Successfully generated file: %s\n", filepath.Join(pkgPath, "zz_easygin_generated.go"))
 	return nil
 }
 
