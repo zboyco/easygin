@@ -4,36 +4,40 @@ import (
 	"context"
 	"net/http/pprof"
 	"os"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
 
 // Server 封装gin.Engine，提供端口和调试模式配置
 type Server struct {
-	engine          *gin.Engine                               `env:"-"`
-	contextInjector func(ctx context.Context) context.Context `env:"-"`
+	engine          *gin.Engine
+	contextInjector func(ctx context.Context) context.Context
 
-	Port  int  `env:""`
-	Debug bool `env:""`
+	addr  string // listen address
+	debug bool   // debug mode
 }
 
-func (s *Server) Init() {
-	s.SetDefault()
-}
+// NewServer creates a new Server
+//
+//	addr: listen address, default ":80"
+//	debug: debug mode
+func NewServer(addr string, debug bool) *Server {
+	s := &Server{
+		addr:  addr,
+		debug: debug,
+	}
 
-func (s *Server) SetDefault() {
-	if !s.Debug {
+	if !s.debug {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	if s.engine == nil {
-		s.engine = gin.Default()
+	if s.addr == "" {
+		s.addr = ":80"
 	}
 
-	if s.Port == 0 {
-		s.Port = 80
-	}
+	s.engine = gin.Default()
+
+	return s
 }
 
 func pprofRegister(e *gin.RouterGroup) {
@@ -84,7 +88,7 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 		c.String(200, "ok")
 	})
 
-	if s.Debug {
+	if s.debug {
 		// 添加pprof接口
 		pprofRegister(rootGroup)
 	}
@@ -100,7 +104,7 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 		handleGroup(rootGroup, group)
 	}
 
-	return s.engine.Run(":" + strconv.Itoa(s.Port))
+	return s.engine.Run(s.addr)
 }
 
 func handleGroup(e *gin.RouterGroup, group *RouterGroup) {

@@ -6,10 +6,6 @@ import (
 )
 
 func main() {
-	srv := &easygin.Server{
-		Port:  8080,
-		Debug: true,
-	}
-	srv.SetDefault()
+	srv := easygin.NewServer(":80", true)
 	srv.Run(apis.RouterRoot)
 }
