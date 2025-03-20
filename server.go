@@ -83,10 +83,6 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 	}
 
 	rootGroup := s.engine.Group("/")
-	// 添加健康检查接口
-	rootGroup.GET("/liveness", func(c *gin.Context) {
-		c.String(200, "ok")
-	})
 
 	if s.debug {
 		// 添加pprof接口

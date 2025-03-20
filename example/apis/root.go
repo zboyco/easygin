@@ -11,6 +11,7 @@ var (
 )
 
 func init() {
+	RouterRoot.RegisterAPI(easygin.NewLivenessRouter("/liveness"))
 	RouterRoot.RegisterGroup(RouterServer)
 	RouterServer.RegisterAPI(easygin.OpenAPIRouter)
 	RouterServer.RegisterAPI(easygin.NewSwaggerUIRouter(RouterServer.Path()))
