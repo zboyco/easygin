@@ -149,11 +149,7 @@ import (
 )
 
 func main()	{
-	server := &easygin.Server{
-		Port: 8080,
-		Debug: true,
-	}}
-	server.Init()
-	server.Run(user.RouterRoot)
+	srv := easygin.NewServer(":80", true)
+	srv.Run(user.RouterRoot)
 }
 ```
