@@ -116,7 +116,10 @@
             "description": ""
           }
         },
-        "summary": "Redirect"
+        "summary": "Redirect",
+        "tags": [
+          "/server/file"
+        ]
       }
     },
     "/server/file/upload": {
@@ -142,7 +145,10 @@
             "description": ""
           }
         },
-        "summary": "Upload file"
+        "summary": "Upload file",
+        "tags": [
+          "/server/file"
+        ]
       }
     },
     "/server/user": {
@@ -187,7 +193,10 @@
             "description": ""
           }
         },
-        "summary": "Get user list"
+        "summary": "Get user list",
+        "tags": [
+          "/server/user"
+        ]
       },
       "post": {
         "requestBody": {
@@ -225,7 +234,10 @@
             "description": ""
           }
         },
-        "summary": "Create user"
+        "summary": "Create user",
+        "tags": [
+          "/server/user"
+        ]
       }
     },
     "/server/user/{id}": {
@@ -297,8 +309,21 @@
             "description": ""
           }
         },
-        "summary": "Get user info"
+        "summary": "Get user info",
+        "tags": [
+          "/server/user"
+        ]
       }
     }
-  }
+  },
+  "tags": [
+    {
+      "description": "APIs",
+      "name": "/server/file"
+    },
+    {
+      "description": "APIs",
+      "name": "/server/user"
+    }
+  ]
 }
