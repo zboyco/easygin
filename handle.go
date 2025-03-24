@@ -3,6 +3,7 @@ package easygin
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"reflect"
 	"slices"
 	"strconv"
@@ -299,7 +300,16 @@ func renderAPI(h RouterHandler) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(200, output)
+		switch v := output.(type) {
+		case url.URL:
+			c.Redirect(302, v.String())
+		case *url.URL:
+			c.Redirect(302, v.String())
+		case string:
+			c.String(200, v)
+		default:
+			c.JSON(200, output)
+		}
 	}
 }
 

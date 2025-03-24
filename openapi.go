@@ -115,6 +115,9 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string) 
 	// 处理当前组的路径前缀
 	basePath := filepath.Join(parentPath, group.path)
 
+	// 标记是否需要为当前组创建标签
+	hasApis := false
+
 	// 处理中间件参数
 	var middlewareParams []*openapi3.ParameterRef
 	for _, middleware := range group.middlewares {
@@ -159,12 +162,38 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string) 
 			continue
 		}
 
+		// 标记当前组有API
+		hasApis = true
+
 		// 获取 API 路径
 		apiPath := filepath.Join(basePath, reflect.ValueOf(api).MethodByName("Path").Call(nil)[0].String())
 		// 转换为 URL 路径格式
 		apiPath = "/" + strings.TrimPrefix(apiPath, "/")
 		// 将:param格式转换为{param}格式
 		apiPath = convertPathParams(apiPath)
+
+		// 创建标签名称，使用完整路径
+		tagName := basePath
+		if tagName == "" {
+			tagName = "/"
+		}
+
+		// 确保标签在文档中存在
+		tagExists := false
+		for _, tag := range doc.Tags {
+			if tag.Name == tagName {
+				tagExists = true
+				break
+			}
+		}
+
+		// 如果标签不存在，添加到文档中
+		if !tagExists && hasApis {
+			doc.Tags = append(doc.Tags, &openapi3.Tag{
+				Name:        tagName,
+				Description: "APIs",
+			})
+		}
 
 		// 创建操作对象
 		responses := openapi3.NewResponses()
@@ -197,6 +226,7 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string) 
 		}
 		op := &openapi3.Operation{
 			Responses: responses,
+			Tags:      []string{tagName}, // 添加标签，使用RouterGroup的完整路径
 		}
 
 		// 获取 API 类型信息

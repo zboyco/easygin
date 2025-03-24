@@ -1,4 +1,4 @@
-package user
+package file
 
 import (
 	"context"
@@ -23,7 +23,7 @@ type ReqUploadFile struct {
 }
 
 func (UploadFile) Path() string {
-	return "/file"
+	return "/upload"
 }
 
 func (req *UploadFile) Output(ctx context.Context) (any, error) {
