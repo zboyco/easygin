@@ -23,24 +23,7 @@
         ],
         "type": "object"
       },
-      "GithubComZboycoEasyginExampleApisUserReqCreateUser": {
-        "properties": {
-          "age": {
-            "description": "User Age",
-            "type": "integer"
-          },
-          "name": {
-            "description": "User Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "age"
-        ],
-        "type": "object"
-      },
-      "GithubComZboycoEasyginExampleApisUserReqUploadFile": {
+      "GithubComZboycoEasyginExampleApisFileReqUploadFile": {
         "properties": {
           "file": {
             "allOf": [
@@ -64,6 +47,23 @@
         },
         "required": [
           "file"
+        ],
+        "type": "object"
+      },
+      "GithubComZboycoEasyginExampleApisUserReqCreateUser": {
+        "properties": {
+          "age": {
+            "description": "User Age",
+            "type": "integer"
+          },
+          "name": {
+            "description": "User Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "age"
         ],
         "type": "object"
       },
@@ -96,6 +96,55 @@
   },
   "openapi": "3.0.3",
   "paths": {
+    "/server/file/redirect": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "url",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "description": ""
+          }
+        },
+        "summary": "Redirect"
+      }
+    },
+    "/server/file/upload": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisFileReqUploadFile"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Response with status code 204"
+          },
+          "default": {
+            "description": ""
+          }
+        },
+        "summary": "Upload file"
+      }
+    },
     "/server/user": {
       "get": {
         "parameters": [
@@ -177,32 +226,6 @@
           }
         },
         "summary": "Create user"
-      }
-    },
-    "/server/user/file": {
-      "post": {
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisUserReqUploadFile"
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Response with status code 204"
-          },
-          "default": {
-            "description": ""
-          }
-        },
-        "summary": "Upload file"
       }
     },
     "/server/user/{id}": {

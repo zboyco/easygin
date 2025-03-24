@@ -2,6 +2,7 @@ package apis
 
 import (
 	"github.com/zboyco/easygin"
+	"github.com/zboyco/easygin/example/apis/file"
 	"github.com/zboyco/easygin/example/apis/user"
 )
 
@@ -16,6 +17,7 @@ func init() {
 	RouterServer.RegisterAPI(easygin.OpenAPIRouter)
 	RouterServer.RegisterAPI(easygin.NewSwaggerUIRouter(RouterServer.Path()))
 	{
+		RouterServer.RegisterGroup(file.RouterRoot)
 		RouterServer.RegisterGroup(user.RouterRoot)
 	}
 }
