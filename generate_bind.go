@@ -606,9 +606,24 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 	// 添加字段类型的包
 	externalTypeImports := make(map[string]bool)
 
-	// 为每个API生成Parse方法并检查使用的包
-	var parseMethods strings.Builder
+	// 对API进行去重处理，确保每个类型只处理一次
+	uniqueAPIs := make(map[string]RouterHandler)
 	for _, api := range apis {
+		apiType := reflect.TypeOf(api)
+		if apiType.Kind() == reflect.Ptr {
+			apiType = apiType.Elem()
+		}
+		
+		// 使用类型的全限定名称作为键进行去重
+		typeKey := apiType.PkgPath() + "." + apiType.Name()
+		if _, exists := uniqueAPIs[typeKey]; !exists {
+			uniqueAPIs[typeKey] = api
+		}
+	}
+
+	// 为每个唯一的API生成Parse方法并检查使用的包
+	var parseMethods strings.Builder
+	for _, api := range uniqueAPIs {
 		apiType := reflect.TypeOf(api)
 		if apiType.Kind() == reflect.Ptr {
 			apiType = apiType.Elem()
