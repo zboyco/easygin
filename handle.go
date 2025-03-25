@@ -3,6 +3,8 @@ package easygin
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"reflect"
 	"slices"
@@ -295,20 +297,69 @@ func renderAPI(h RouterHandler) gin.HandlerFunc {
 			return
 		}
 
+		var (
+			code           = http.StatusOK
+			withStatusCode = false
+		)
+
+		switch v := output.(type) {
+		case WithStatusCode:
+			code = v.StatusCode
+			output = v.Output
+			withStatusCode = true
+		case *WithStatusCode:
+			code = v.StatusCode
+			output = v.Output
+			withStatusCode = true
+		default:
+		}
+
 		if output == nil {
-			c.JSON(204, nil)
+			if withStatusCode {
+				c.Status(code)
+			} else {
+				c.Status(http.StatusNoContent)
+			}
 			return
 		}
 
 		switch v := output.(type) {
 		case url.URL:
-			c.Redirect(302, v.String())
+			if withStatusCode {
+				c.Redirect(code, v.String())
+			} else {
+				c.Redirect(http.StatusFound, v.String())
+			}
 		case *url.URL:
-			c.Redirect(302, v.String())
+			if withStatusCode {
+				c.Redirect(code, v.String())
+			} else {
+				c.Redirect(http.StatusFound, v.String())
+			}
 		case string:
-			c.String(200, v)
+			c.String(code, v)
+		case AttachmentFromFile:
+			c.Header("Content-Disposition", fmt.Sprintf("%s; filename=%s", v.Disposition, v.Filename))
+			c.Data(code, v.ContentType, v.Content)
+		case *AttachmentFromFile:
+			c.Header("Content-Disposition", fmt.Sprintf("%s; filename=%s", v.Disposition, v.Filename))
+			c.Data(code, v.ContentType, v.Content)
+		case AttachmentFromReader:
+			c.Header("Content-Disposition", fmt.Sprintf("%s; filename=%s", v.Disposition, v.Filename))
+			c.DataFromReader(code, v.ContentLength, v.ContentType, v.Reader, nil)
+			// if v.Reader implements io.Closer, close it
+			if closer, ok := v.Reader.(io.Closer); ok {
+				_ = closer.Close()
+			}
+		case *AttachmentFromReader:
+			c.Header("Content-Disposition", fmt.Sprintf("%s; filename=%s", v.Disposition, v.Filename))
+			c.DataFromReader(code, v.ContentLength, v.ContentType, v.Reader, nil)
+			// if v.Reader implements io.Closer, close it
+			if closer, ok := v.Reader.(io.Closer); ok {
+				_ = closer.Close()
+			}
 		default:
-			c.JSON(200, output)
+			c.JSON(code, output)
 		}
 	}
 }
@@ -353,4 +404,44 @@ func GinContextFromContext(ctx context.Context) *gin.Context {
 		return nil
 	}
 	return raw.(*gin.Context)
+}
+
+type Disposition string
+
+const (
+	DispositionAttachment Disposition = "attachment"
+	DispositionInline     Disposition = "inline"
+)
+
+type AttachmentFromFile struct {
+	// exp. "attachment","inline"
+	Disposition Disposition
+	// exp. "application/octet-stream","image/png","text/plain"
+	ContentType string
+	// exp. "file.png"
+	Filename string
+	// exp. os.Open("file.png")
+	Content []byte
+}
+
+type AttachmentFromReader struct {
+	// exp. "attachment","inline"
+	Disposition Disposition
+	// exp. "application/octet-stream","image/png","text/plain"
+	ContentType string
+	// exp. "file.png"
+	Filename string
+	// exp. os.Open("file.png")
+	Reader io.Reader
+	// File content length (in bytes):
+	// A positive number indicates the exact size
+	// 0 indicates an empty file
+	// -1 indicates unknown length (chunked transfer will be used)
+	ContentLength int64
+}
+
+// WithStatusCode 用于返回指定状态码和响应体的结构体
+type WithStatusCode struct {
+	StatusCode int
+	Output     any
 }

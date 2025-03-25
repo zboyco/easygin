@@ -8,6 +8,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func (r *Download) EasyGinBindParameters(c *gin.Context) error {
+	return nil
+}
+
+func (r *Image) EasyGinBindParameters(c *gin.Context) error {
+	return nil
+}
+
 func (r *Redirect) EasyGinBindParameters(c *gin.Context) error {
 	// 绑定查询参数 url
 	{

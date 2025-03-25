@@ -563,9 +563,19 @@ func (OpenAPI) Path() string {
 }
 
 func (OpenAPI) Output(ctx context.Context) (any, error) {
-	c := GinContextFromContext(ctx)
-	c.File("openapi.json")
-	return nil, nil
+	file, err := os.Open("openapi.json")
+	if err != nil {
+		return nil, NewError(500, "open openapi.json error", err.Error())
+	}
+	fileInfo, _ := file.Stat()
+
+	return &AttachmentFromReader{
+		Disposition:   DispositionInline,
+		ContentType:   "application/json",
+		Filename:      "openapi.json",
+		ContentLength: fileInfo.Size(),
+		Reader:        file,
+	}, nil
 }
 
 func NewSwaggerUIRouter(path string) *SwaggerUI {

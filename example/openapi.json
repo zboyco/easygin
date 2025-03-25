@@ -96,6 +96,38 @@
   },
   "openapi": "3.0.3",
   "paths": {
+    "/server/file/download": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "description": ""
+          }
+        },
+        "summary": "download file",
+        "tags": [
+          "/server/file"
+        ]
+      }
+    },
+    "/server/file/image": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "description": ""
+          }
+        },
+        "summary": "image",
+        "tags": [
+          "/server/file"
+        ]
+      }
+    },
     "/server/file/redirect": {
       "get": {
         "parameters": [
