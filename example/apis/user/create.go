@@ -15,6 +15,11 @@ type CreateUser struct {
 	Body               ReqCreateUser `in:"body"`
 }
 
+type ReqCreateUser struct {
+	Name string `json:"name" desc:"User Name"`
+	Age  int    `json:"age" desc:"User Age"`
+}
+
 func (CreateUser) Path() string {
 	return ""
 }
@@ -31,9 +36,4 @@ func (CreateUser) Responses() easygin.R {
 		204: nil,
 		400: easygin.Error{},
 	}
-}
-
-type ReqCreateUser struct {
-	Name string `json:"name" desc:"User Name"`
-	Age  int    `json:"age" desc:"User Age"`
 }
