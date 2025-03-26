@@ -344,7 +344,9 @@ return nil, easygin.NewError(404, "user not found", "detailed error message")
 go run main.go gen
 ```
 
-这将为每个包生成 `zz_easygin_generated.go` 文件，包含静态的参数绑定方法。
+这将为每个包生成 `zz_easygin_generated.go` 文件，包含静态的参数绑定方法。   
+
+![静态参数绑定方法生成演示](https://raw.githubusercontent.com/zboyco/easygin/main/example/gen.gif)   
 
 > 注意：生成静态方法需要在项目开发时手动调用，即先运行 `go run . gen` 命令，然后再运行程序，因为生成的代码需要参与编译过程。   
 
@@ -361,7 +363,9 @@ easygin 提供了生成OpenAPI文档的功能：
 go run main.go openapi
 ```
 
-这将在当前目录下生成 `openapi.json` 文件。
+这将在当前目录下生成 `openapi.json` 文件。   
+
+![OpenAPI文档生成演示](https://raw.githubusercontent.com/zboyco/easygin/main/example/openapi.gif)   
 
 > 内部实际调用了`easygin.GenerateOpenAPI`方法，该方法使用反射实现，有一定的耗时，可以根据需要在程序运行前手动生成，也可以在运行时自动生成文档，建议提前生成。
 
