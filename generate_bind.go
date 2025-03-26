@@ -310,29 +310,56 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 	// 检查字段类型是否为指针，如果是则添加实例化代码
 	if field.Type.Kind() == reflect.Ptr {
 		elemType := field.Type.Elem()
-		typeName := elemType.Name()
+		
+		// 处理匿名结构体的情况
+		if elemType.Name() == "" && elemType.Kind() == reflect.Struct {
+			// 对于匿名结构体，使用new()来创建实例，并格式化结构体定义以提高可读性
+			builder.WriteString(fmt.Sprintf("\t// 实例化 %s\n", strings.TrimPrefix(fieldName, "r.")))
+			builder.WriteString(fmt.Sprintf("\tif %s == nil {\n", fieldName))
+			
+			// 开始结构体定义
+			builder.WriteString(fmt.Sprintf("\t\t%s = new(struct {\n", fieldName))
+			
+			// 遍历匿名结构体的字段，每个字段单独一行
+			for i := 0; i < elemType.NumField(); i++ {
+				subField := elemType.Field(i)
+				// 格式化字段定义，包括名称、类型和标签
+				fieldDef := fmt.Sprintf("\t\t\t%s %s", subField.Name, subField.Type.String())
+				if subField.Tag != "" {
+					fieldDef += fmt.Sprintf(" `%s`", subField.Tag)
+				}
+				builder.WriteString(fieldDef + "\n")
+			}
+			
+			// 结束结构体定义
+			builder.WriteString("\t\t})\n")
+			builder.WriteString("\t}\n\n")
+		} else {
+			// 处理命名结构体的情况
+			typeName := elemType.Name()
 
-		// 如果是外部包的类型，需要加上包名
-		if elemType.PkgPath() != currentPkgPath && !isBuiltinType(elemType) {
-			// 获取包名（最后一个斜杠后的部分）
-			pkgName := filepath.Base(elemType.PkgPath())
+			// 如果是外部包的类型，需要加上包名
+			if elemType.PkgPath() != currentPkgPath && !isBuiltinType(elemType) {
+				// 获取包名（最后一个斜杠后的部分）
+				pkgName := filepath.Base(elemType.PkgPath())
 
-			// 使用完整的包名.类型名
-			typeName = pkgName + "." + typeName
+				// 使用完整的包名.类型名
+				typeName = pkgName + "." + typeName
 
-			// 创建一个临时的方法字符串，确保包含类型名称
-			// 这样在后续的collectExternalPackages中能够检测到这个类型的使用
-			tempMethod := fmt.Sprintf("temp function using %s", typeName)
+				// 创建一个临时的方法字符串，确保包含类型名称
+				// 这样在后续的collectExternalPackages中能够检测到这个类型的使用
+				tempMethod := fmt.Sprintf("temp function using %s", typeName)
 
-			// 创建一个临时的imports映射，用于收集外部包
-			tempImports := make(map[string]bool)
-			collectExternalPackages(tempMethod, elemType, tempImports)
+				// 创建一个临时的imports映射，用于收集外部包
+				tempImports := make(map[string]bool)
+				collectExternalPackages(tempMethod, elemType, tempImports)
+			}
+
+			builder.WriteString(fmt.Sprintf("\t// 实例化 %s\n", strings.TrimPrefix(fieldName, "r.")))
+			builder.WriteString(fmt.Sprintf("\tif %s == nil {\n", fieldName))
+			builder.WriteString(fmt.Sprintf("\t\t%s = &%s{}\n", fieldName, typeName))
+			builder.WriteString("\t}\n\n")
 		}
-
-		builder.WriteString(fmt.Sprintf("\t// 实例化 %s\n", strings.TrimPrefix(fieldName, "r.")))
-		builder.WriteString(fmt.Sprintf("\tif %s == nil {\n", fieldName))
-		builder.WriteString(fmt.Sprintf("\t\t%s = &%s{}\n", fieldName, typeName))
-		builder.WriteString("\t}\n\n")
 	}
 
 	if mime == "multipart" {

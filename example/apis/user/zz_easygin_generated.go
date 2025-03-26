@@ -13,34 +13,6 @@ import (
 	"github.com/zboyco/easygin"
 )
 
-func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
-	// 绑定查询参数 name
-	{
-		queryVal := c.Query("name")
-		if queryVal != "" {
-			r.Name = string(queryVal)
-		}
-	}
-	// 绑定查询参数 ageMin
-	{
-		queryVal := c.Query("ageMin")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
-			queryVal = "18"
-		}
-		if queryVal != "" {
-			intVal, err := strconv.ParseInt(queryVal, 10, 64)
-			if err != nil {
-				return fmt.Errorf("invalid parameter 'ageMin': %v", err.Error())
-			}
-			r.AgeMin = int(intVal)
-		}
-	}
-	return nil
-}
-
 func (r *CreateUser) EasyGinBindParameters(c *gin.Context) error {
 	{
 		// 绑定JSON请求体
@@ -85,6 +57,34 @@ func (r *GetUser) EasyGinBindParameters(c *gin.Context) error {
 				return fmt.Errorf("invalid parameter 'id': %v", err.Error())
 			}
 			r.ID = int(intVal)
+		}
+	}
+	return nil
+}
+
+func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
+	// 绑定查询参数 name
+	{
+		queryVal := c.Query("name")
+		if queryVal != "" {
+			r.Name = string(queryVal)
+		}
+	}
+	// 绑定查询参数 ageMin
+	{
+		queryVal := c.Query("ageMin")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "18"
+		}
+		if queryVal != "" {
+			intVal, err := strconv.ParseInt(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'ageMin': %v", err.Error())
+			}
+			r.AgeMin = int(intVal)
 		}
 	}
 	return nil

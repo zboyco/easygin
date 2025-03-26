@@ -12,9 +12,9 @@ var (
 )
 
 func init() {
-	RouterRoot.RegisterAPI(easygin.NewLivenessRouter("/liveness"))
-	RouterRoot.RegisterGroup(RouterServer)
-	RouterServer.RegisterAPI(easygin.OpenAPIRouter)
+	RouterRoot.RegisterAPI(easygin.NewLivenessRouter("/liveness")) // 注册健康检查路由
+	RouterRoot.RegisterGroup(RouterServer)                         // 注册路由组
+	RouterServer.RegisterAPI(easygin.OpenAPIRouter)                // 注册OpenAPI路由
 	RouterServer.RegisterAPI(easygin.NewSwaggerUIRouter(RouterServer.Path()))
 	{
 		RouterServer.RegisterGroup(file.RouterRoot)
