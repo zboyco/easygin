@@ -11,9 +11,10 @@
 - 签名: `func GenerateOpenAPI(groups ...*RouterGroup) error`
 - 功能: 为给定的路由组生成 OpenAPI 3.0.3 规范文档
 - 流程:
-  1. 创建 OpenAPI 规范文档结构
-  2. 遍历所有路由组，生成路径信息
-  3. 将文档序列化为 JSON 并保存到文件
+  1. 初始化已处理类型的映射 `processedTypes`
+  2. 创建 OpenAPI 规范文档结构
+  3. 遍历所有路由组，生成路径信息
+  4. 将文档序列化为 JSON 并保存到文件
 
 ### generateGroupPaths
 - 签名: `func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string) error`
@@ -40,6 +41,8 @@
   1. 处理指针类型
   2. 将结构体类型添加到 components/schemas
   3. 支持引用已定义的组件
+  4. 使用 `processedTypes` 映射跟踪已处理类型，避免无限递归
+  5. 对于已处理过的类型，直接返回引用，确保一致性
 
 ### generateSchemaValue
 - 签名: `func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3.Schema`
@@ -51,6 +54,7 @@
   4. Map 类型
   5. 特殊处理 time.Time 和 multipart.FileHeader
   6. 接口类型处理
+  7. 特殊处理自嵌套类型，添加 `x-circular-ref` 标记
 
 ## 辅助函数
 
@@ -73,6 +77,13 @@
 - 签名: `func Ptr[T any](v T) *T`
 - 功能: 返回指向给定值的指针
 - 用途: 简化创建指针的操作，特别是在 OpenAPI 规范中需要指针的场景
+
+## 全局变量
+
+### processedTypes
+- 类型: `map[string]bool`
+- 功能: 跟踪已处理的类型，避免重复处理和无限递归
+- 用途: 解决自嵌套类型和循环引用问题，确保生成的 OpenAPI 文档正确
 
 ## 路由结构体
 
@@ -129,6 +140,11 @@
 5. **组件复用**:
    - 将复杂类型添加到 components/schemas
    - 使用引用避免重复定义
+
+6. **循环引用处理**:
+   - 使用 `processedTypes` 映射跟踪已处理类型
+   - 对于自嵌套类型，添加特殊标记并使用引用
+   - 处理数组元素中的循环引用
 
 ## 文件生成
 

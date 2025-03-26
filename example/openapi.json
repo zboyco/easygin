@@ -36,11 +36,7 @@
           "images": {
             "description": "Upload Images",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/MimeMultipartFileHeader"
-                }
-              ]
+              "$ref": "#/components/schemas/MimeMultipartFileHeader"
             },
             "type": "array"
           }
@@ -209,11 +205,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisUserRespGetUser"
-                      }
-                    ]
+                    "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisUserRespGetUser"
                   },
                   "type": "array"
                 }

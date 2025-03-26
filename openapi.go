@@ -24,8 +24,14 @@ func Ptr[T any](v T) *T {
 	return &v
 }
 
+// 添加一个全局变量，用于记录已处理的类型
+var processedTypes map[string]bool
+
 func GenerateOpenAPI(groups ...*RouterGroup) error {
 	fmt.Println("Generating file for OpenAPI specification...")
+
+	// 初始化正在处理的类型映射
+	processedTypes = make(map[string]bool)
 
 	// 创建 OpenAPI 规范文档
 	paths := openapi3.Paths{}
@@ -90,7 +96,21 @@ func generateSchema(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3
 	if t.Kind() == reflect.Struct && t.PkgPath() != "" {
 		// 将包路径和类型名转换为有效的组件名
 		schemaName := snakeToPascalCase(t.PkgPath() + "." + t.Name())
+
+		// 检查是否已经在处理这个类型，避免无限递归
+		if processedTypes[schemaName] {
+			// 如果正在处理或已处理过，直接返回引用
+			return &openapi3.Schema{
+				AllOf: []*openapi3.SchemaRef{{
+					Ref: "#/components/schemas/" + schemaName,
+				}},
+			}
+		}
+
 		if _, exists := doc.Components.Schemas[schemaName]; !exists {
+			// 标记该类型正在处理中
+			processedTypes[schemaName] = true
+
 			// 将类型定义添加到components/schemas
 			schemaValue := generateSchemaValue(doc, t, isMultipart)
 
@@ -423,6 +443,12 @@ var doc *openapi3.T
 func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3.Schema {
 	var schema *openapi3.Schema
 
+	// 获取基础类型，用于检测自嵌套
+	baseType := t
+	if baseType.Kind() == reflect.Ptr {
+		baseType = baseType.Elem()
+	}
+
 	// 特殊处理multipart.FileHeader类型
 	if t.String() == "multipart.FileHeader" {
 		schema = openapi3.NewStringSchema()
@@ -497,9 +523,67 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 			}
 
 			if name != "" && name != "-" {
-				schemaRef := &openapi3.SchemaRef{
-					Value: generateSchema(doc, field.Type, isMultipart),
+				// 检查字段类型是否为自嵌套类型
+				fieldType := field.Type
+				if fieldType.Kind() == reflect.Ptr {
+					fieldType = fieldType.Elem()
 				}
+
+				var schemaRef *openapi3.SchemaRef
+
+				// 检查是否是自嵌套类型
+				if fieldType == baseType || (fieldType.Kind() == reflect.Ptr && fieldType.Elem() == baseType) {
+					// 对于自嵌套类型，使用引用
+					if baseType.PkgPath() != "" {
+						schemaName := snakeToPascalCase(baseType.PkgPath() + "." + baseType.Name())
+						// 创建一个组合schema
+						schema := openapi3.NewObjectSchema()
+
+						// 添加描述信息
+						if desc != "" {
+							schema.Description = desc
+						}
+
+						// 添加类型信息
+						schema.Type = &openapi3.Types{openapi3.TypeObject}
+
+						// 添加一个title，帮助识别这是一个引用
+						schema.Title = schemaName
+
+						// 使用allOf引用原始类型
+						schema.AllOf = []*openapi3.SchemaRef{
+							{
+								Ref: "#/components/schemas/" + schemaName,
+							},
+						}
+
+						// 添加一个额外的属性，明确指出这是一个循环引用
+						if schema.Extensions == nil {
+							schema.Extensions = make(map[string]interface{})
+						}
+						schema.Extensions["x-circular-ref"] = true
+
+						schemaRef = &openapi3.SchemaRef{
+							Value: schema,
+						}
+					} else {
+						// 如果没有包路径，创建一个简单的对象
+						schema := openapi3.NewObjectSchema()
+						if desc != "" {
+							schema.Description = desc
+						}
+						schema.Title = "循环引用对象"
+						schemaRef = &openapi3.SchemaRef{
+							Value: schema,
+						}
+					}
+				} else {
+					// 对于非自嵌套类型，正常处理
+					schemaRef = &openapi3.SchemaRef{
+						Value: generateSchema(doc, field.Type, isMultipart),
+					}
+				}
+
 				// 添加字段描述
 				if desc != "" && schemaRef.Value != nil {
 					schemaRef.Value.Description = desc
@@ -511,6 +595,34 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 				}
 			}
 		}
+	case reflect.Slice, reflect.Array:
+		schema = openapi3.NewArraySchema()
+
+		// 检查元素类型是否会导致循环引用
+		elemType := t.Elem()
+		if elemType.Kind() == reflect.Ptr {
+			elemType = elemType.Elem()
+		}
+
+		// 如果元素类型是结构体且有包路径，检查是否会导致循环引用
+		if elemType.Kind() == reflect.Struct && elemType.PkgPath() != "" {
+			schemaName := snakeToPascalCase(elemType.PkgPath() + "." + elemType.Name())
+
+			// 如果正在处理这个类型，直接使用引用避免无限递归
+			if processedTypes[schemaName] {
+				schema.Items = &openapi3.SchemaRef{
+					Ref: "#/components/schemas/" + schemaName,
+				}
+			} else {
+				schema.Items = &openapi3.SchemaRef{
+					Value: generateSchema(doc, elemType, isMultipart),
+				}
+			}
+		} else {
+			schema.Items = &openapi3.SchemaRef{
+				Value: generateSchema(doc, elemType, isMultipart),
+			}
+		}
 	case reflect.String:
 		schema = openapi3.NewStringSchema()
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
@@ -519,11 +631,6 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 		schema = openapi3.NewFloat64Schema()
 	case reflect.Bool:
 		schema = openapi3.NewBoolSchema()
-	case reflect.Slice, reflect.Array:
-		schema = openapi3.NewArraySchema()
-		schema.Items = &openapi3.SchemaRef{
-			Value: generateSchema(doc, t.Elem(), isMultipart),
-		}
 	case reflect.Map:
 		// 处理 Map 类型
 		schema = openapi3.NewObjectSchema()
