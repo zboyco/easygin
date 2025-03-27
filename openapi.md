@@ -42,7 +42,7 @@
   2. 将结构体类型添加到 components/schemas
   3. 支持引用已定义的组件
   4. 使用 `processedTypes` 映射跟踪已处理类型，避免无限递归
-  5. 对于已处理过的类型，直接返回引用，确保一致性
+  5. 对于已处理过的类型，直接使用 `$ref` 扩展字段返回引用，不使用 `allOf` 包装
 
 ### generateSchemaValue
 - 签名: `func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3.Schema`
@@ -54,7 +54,7 @@
   4. Map 类型
   5. 特殊处理 time.Time 和 multipart.FileHeader
   6. 接口类型处理
-  7. 特殊处理自嵌套类型，添加 `x-circular-ref` 标记
+  7. 特殊处理自嵌套类型，使用 `$ref` 扩展字段直接引用
 
 ## 辅助函数
 
@@ -139,11 +139,12 @@
 
 5. **组件复用**:
    - 将复杂类型添加到 components/schemas
-   - 使用引用避免重复定义
+   - 使用 `$ref` 扩展字段直接引用，不使用 `allOf` 包装
 
 6. **循环引用处理**:
    - 使用 `processedTypes` 映射跟踪已处理类型
-   - 对于自嵌套类型，添加特殊标记并使用引用
+   - 对于自嵌套类型，使用 `$ref` 扩展字段直接引用
+   - 为自嵌套引用添加 `title` 属性，帮助识别引用类型
    - 处理数组元素中的循环引用
 
 ## 文件生成

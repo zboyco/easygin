@@ -225,7 +225,7 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string) 
 					Content: openapi3.Content{
 						"application/json": &openapi3.MediaType{
 							Schema: &openapi3.SchemaRef{
-								Ref: "#/components/schemas/GithubComZboycoEasyginError",
+								Value: generateSchema(doc, reflect.TypeOf(&Error{}), false),
 							},
 						},
 					},
