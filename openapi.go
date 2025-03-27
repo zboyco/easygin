@@ -217,6 +217,9 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string) 
 
 		// 创建操作对象
 		responses := openapi3.NewResponses()
+		// 移除默认响应
+		responses.Delete("default")
+
 		// 检查是否实现了RouterResponse接口
 		if responder, ok := api.(RouterResponse); ok {
 			// 获取所有可能的响应
@@ -244,6 +247,7 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string) 
 				Description: Ptr("Successful response"),
 			}})
 		}
+
 		op := &openapi3.Operation{
 			Responses: responses,
 			Tags:      []string{tagName}, // 添加标签，使用RouterGroup的完整路径

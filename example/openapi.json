@@ -97,9 +97,6 @@
         "responses": {
           "200": {
             "description": "Successful response"
-          },
-          "default": {
-            "description": ""
           }
         },
         "summary": "download file",
@@ -113,9 +110,6 @@
         "responses": {
           "200": {
             "description": "Successful response"
-          },
-          "default": {
-            "description": ""
           }
         },
         "summary": "image",
@@ -139,9 +133,6 @@
         "responses": {
           "200": {
             "description": "Successful response"
-          },
-          "default": {
-            "description": ""
           }
         },
         "summary": "Redirect",
@@ -168,9 +159,6 @@
         "responses": {
           "204": {
             "description": "Response with status code 204"
-          },
-          "default": {
-            "description": ""
           }
         },
         "summary": "Upload file",
@@ -212,9 +200,6 @@
               }
             },
             "description": "Response with status code 200"
-          },
-          "default": {
-            "description": ""
           }
         },
         "summary": "Get user list",
@@ -253,9 +238,6 @@
               }
             },
             "description": "Response with status code 400"
-          },
-          "default": {
-            "description": ""
           }
         },
         "summary": "Create user",
@@ -328,9 +310,6 @@
               }
             },
             "description": "Response with status code 404"
-          },
-          "default": {
-            "description": ""
           }
         },
         "summary": "Get user info",
