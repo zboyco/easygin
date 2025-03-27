@@ -101,9 +101,10 @@ func generateSchema(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3
 		if processedTypes[schemaName] {
 			// 如果正在处理或已处理过，直接返回引用
 			return &openapi3.Schema{
-				AllOf: []*openapi3.SchemaRef{{
-					Ref: "#/components/schemas/" + schemaName,
-				}},
+				// 不使用 AllOf，而是直接使用 $ref 字段
+				Extensions: map[string]interface{}{
+					"$ref": "#/components/schemas/" + schemaName,
+				},
 			}
 		}
 
@@ -122,9 +123,10 @@ func generateSchema(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3
 		}
 		// 返回对该类型的引用
 		return &openapi3.Schema{
-			AllOf: []*openapi3.SchemaRef{{
-				Ref: "#/components/schemas/" + schemaName,
-			}},
+			// 不使用 AllOf，而是直接使用 $ref 字段
+			Extensions: map[string]interface{}{
+				"$ref": "#/components/schemas/" + schemaName,
+			},
 		}
 	}
 
@@ -540,31 +542,21 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 					// 对于自嵌套类型，使用引用
 					if baseType.PkgPath() != "" {
 						schemaName := snakeToPascalCase(baseType.PkgPath() + "." + baseType.Name())
-						// 创建一个组合schema
+						// 修改：直接创建引用而不使用allOf
 						schema := openapi3.NewObjectSchema()
+						schema.Extensions = make(map[string]interface{})
 
-						// 添加描述信息
+						// 添加描述信息（通过扩展字段，因为引用类型不能直接添加描述）
 						if desc != "" {
-							schema.Description = desc
+							schema.Extensions["x-description"] = desc
 						}
-
-						// 添加类型信息
-						schema.Type = &openapi3.Types{openapi3.TypeObject}
 
 						// 添加一个title，帮助识别这是一个引用
 						schema.Title = schemaName
 
-						// 使用allOf引用原始类型
-						schema.AllOf = []*openapi3.SchemaRef{
-							{
-								Ref: "#/components/schemas/" + schemaName,
-							},
-						}
+						schema.Extensions["$ref"] = "#/components/schemas/" + schemaName
 
 						// 添加一个额外的属性，明确指出这是一个循环引用
-						if schema.Extensions == nil {
-							schema.Extensions = make(map[string]interface{})
-						}
 						schema.Extensions["x-circular-ref"] = true
 
 						schemaRef = &openapi3.SchemaRef{

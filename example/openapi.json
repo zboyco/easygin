@@ -26,11 +26,7 @@
       "GithubComZboycoEasyginExampleApisFileReqUploadFile": {
         "properties": {
           "file": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MimeMultipartFileHeader"
-              }
-            ],
+            "$ref": "#/components/schemas/MimeMultipartFileHeader",
             "description": "Upload File"
           },
           "images": {
@@ -72,6 +68,13 @@
           "name": {
             "description": "User Name",
             "type": "string"
+          },
+          "sub": {
+            "description": "Sub User",
+            "items": {
+              "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisUserRespGetUser"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -147,11 +150,7 @@
           "content": {
             "multipart/form-data": {
               "schema": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisFileReqUploadFile"
-                  }
-                ]
+                "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisFileReqUploadFile"
               }
             }
           }
@@ -212,11 +211,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisUserReqCreateUser"
-                  }
-                ]
+                "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisUserReqCreateUser"
               }
             }
           }
@@ -229,11 +224,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/GithubComZboycoEasyginError"
-                    }
-                  ]
+                  "$ref": "#/components/schemas/GithubComZboycoEasyginError"
                 }
               }
             },
@@ -273,11 +264,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisUserRespGetUser"
-                    }
-                  ]
+                  "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisUserRespGetUser"
                 }
               }
             },
@@ -287,11 +274,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/GithubComZboycoEasyginError"
-                    }
-                  ]
+                  "$ref": "#/components/schemas/GithubComZboycoEasyginError"
                 }
               }
             },
@@ -301,11 +284,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/GithubComZboycoEasyginError"
-                    }
-                  ]
+                  "$ref": "#/components/schemas/GithubComZboycoEasyginError"
                 }
               }
             },
