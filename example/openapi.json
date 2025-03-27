@@ -68,13 +68,6 @@
           "name": {
             "description": "User Name",
             "type": "string"
-          },
-          "sub": {
-            "description": "Sub User",
-            "items": {
-              "$ref": "#/components/schemas/GithubComZboycoEasyginExampleApisUserRespGetUser"
-            },
-            "type": "array"
           }
         },
         "required": [
@@ -100,6 +93,16 @@
         "responses": {
           "200": {
             "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubComZboycoEasyginError"
+                }
+              }
+            },
+            "description": "Default response with error"
           }
         },
         "summary": "download file",
@@ -113,6 +116,16 @@
         "responses": {
           "200": {
             "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubComZboycoEasyginError"
+                }
+              }
+            },
+            "description": "Default response with error"
           }
         },
         "summary": "image",
@@ -136,6 +149,16 @@
         "responses": {
           "200": {
             "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubComZboycoEasyginError"
+                }
+              }
+            },
+            "description": "Default response with error"
           }
         },
         "summary": "Redirect",
@@ -158,6 +181,16 @@
         "responses": {
           "204": {
             "description": "Response with status code 204"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubComZboycoEasyginError"
+                }
+              }
+            },
+            "description": "Default response with error"
           }
         },
         "summary": "Upload file",
@@ -199,6 +232,16 @@
               }
             },
             "description": "Response with status code 200"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubComZboycoEasyginError"
+                }
+              }
+            },
+            "description": "Default response with error"
           }
         },
         "summary": "Get user list",
@@ -229,6 +272,16 @@
               }
             },
             "description": "Response with status code 400"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubComZboycoEasyginError"
+                }
+              }
+            },
+            "description": "Default response with error"
           }
         },
         "summary": "Create user",
@@ -289,6 +342,16 @@
               }
             },
             "description": "Response with status code 404"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubComZboycoEasyginError"
+                }
+              }
+            },
+            "description": "Default response with error"
           }
         },
         "summary": "Get user info",

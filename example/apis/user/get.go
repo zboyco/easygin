@@ -44,7 +44,6 @@ func (GetUser) Responses() easygin.R {
 }
 
 type RespGetUser struct {
-	ID   int           `json:"id" desc:"User ID"`
-	Name string        `json:"name" desc:"User Name"`
-	Sub  []RespGetUser `json:"sub,omitempty" desc:"Sub User"`
+	ID   int    `json:"id" desc:"User ID"`
+	Name string `json:"name" desc:"User Name"`
 }

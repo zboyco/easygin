@@ -218,9 +218,22 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string) 
 		}
 
 		// 创建操作对象
-		responses := openapi3.NewResponses()
-		// 移除默认响应
-		responses.Delete("default")
+		responses := openapi3.NewResponses(func(r *openapi3.Responses) {
+			defaultRef := &openapi3.ResponseRef{
+				Value: &openapi3.Response{
+					Description: Ptr("Default response"),
+					Content: openapi3.Content{
+						"application/json": &openapi3.MediaType{
+							Schema: &openapi3.SchemaRef{
+								Ref: "#/components/schemas/GithubComZboycoEasyginError",
+							},
+						},
+					},
+				},
+			}
+			defaultRef.Value.Description = Ptr("Default response with error")
+			r.Set("default", defaultRef)
+		})
 
 		// 检查是否实现了RouterResponse接口
 		if responder, ok := api.(RouterResponse); ok {
@@ -546,18 +559,10 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 						schema := openapi3.NewObjectSchema()
 						schema.Extensions = make(map[string]interface{})
 
-						// 添加描述信息（通过扩展字段，因为引用类型不能直接添加描述）
-						if desc != "" {
-							schema.Extensions["x-description"] = desc
-						}
-
 						// 添加一个title，帮助识别这是一个引用
 						schema.Title = schemaName
 
 						schema.Extensions["$ref"] = "#/components/schemas/" + schemaName
-
-						// 添加一个额外的属性，明确指出这是一个循环引用
-						schema.Extensions["x-circular-ref"] = true
 
 						schemaRef = &openapi3.SchemaRef{
 							Value: schema,
