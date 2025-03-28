@@ -20,6 +20,7 @@ type UploadFile struct {
 type ReqUploadFile struct {
 	File   *multipart.FileHeader   `name:"file" desc:"Upload File"`
 	Images []*multipart.FileHeader `name:"images,omitempty" desc:"Upload Images"`
+	Tags   []string                `name:"tags" desc:"Tags"`
 }
 
 func (UploadFile) Path() string {

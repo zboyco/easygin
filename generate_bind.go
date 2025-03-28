@@ -310,16 +310,16 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 	// 检查字段类型是否为指针，如果是则添加实例化代码
 	if field.Type.Kind() == reflect.Ptr {
 		elemType := field.Type.Elem()
-		
+
 		// 处理匿名结构体的情况
 		if elemType.Name() == "" && elemType.Kind() == reflect.Struct {
 			// 对于匿名结构体，使用new()来创建实例，并格式化结构体定义以提高可读性
 			builder.WriteString(fmt.Sprintf("\t// 实例化 %s\n", strings.TrimPrefix(fieldName, "r.")))
 			builder.WriteString(fmt.Sprintf("\tif %s == nil {\n", fieldName))
-			
+
 			// 开始结构体定义
 			builder.WriteString(fmt.Sprintf("\t\t%s = new(struct {\n", fieldName))
-			
+
 			// 遍历匿名结构体的字段，每个字段单独一行
 			for i := 0; i < elemType.NumField(); i++ {
 				subField := elemType.Field(i)
@@ -330,7 +330,7 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 				}
 				builder.WriteString(fieldDef + "\n")
 			}
-			
+
 			// 结束结构体定义
 			builder.WriteString("\t\t})\n")
 			builder.WriteString("\t}\n\n")
@@ -454,7 +454,27 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 			builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required files '%s'\")\n", paramName))
 		}
 		builder.WriteString("\t\t}\n")
+	} else if field.Type.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.String {
+		// 处理字符串数组
+		builder.WriteString(fmt.Sprintf("\t\t%s = c.PostFormArray(\"%s\")\n", fieldName, paramName))
+		if !isOmitempty {
+			builder.WriteString(fmt.Sprintf("\t\tif len(%s) == 0 {\n", fieldName))
+			builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required parameter '%s' in form\")\n", paramName))
+			builder.WriteString("\t\t}\n")
+		}
+	} else if field.Type.Kind() == reflect.Ptr && field.Type.Elem().Kind() == reflect.Slice && field.Type.Elem().Elem().Kind() == reflect.String {
+		// 处理字符串数组的指针
+		builder.WriteString(fmt.Sprintf("\t\tvalues := c.PostFormArray(\"%s\")\n", paramName))
+		if !isOmitempty {
+			builder.WriteString("\t\tif len(values) == 0 {\n")
+			builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required parameter '%s' in form\")\n", paramName))
+			builder.WriteString("\t\t}\n")
+		}
+		builder.WriteString("\t\tif len(values) > 0 {\n")
+		builder.WriteString(fmt.Sprintf("\t\t\t%s = &values\n", fieldName))
+		builder.WriteString("\t\t}\n")
 	} else {
+		// 处理其他类型
 		builder.WriteString(fmt.Sprintf("\t\tformVal := c.PostForm(\"%s\")\n", paramName))
 
 		// 根据字段类型添加零值检查
@@ -640,7 +660,7 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 		if apiType.Kind() == reflect.Ptr {
 			apiType = apiType.Elem()
 		}
-		
+
 		// 使用类型的全限定名称作为键进行去重
 		typeKey := apiType.PkgPath() + "." + apiType.Name()
 		if _, exists := uniqueAPIs[typeKey]; !exists {
