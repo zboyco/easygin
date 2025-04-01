@@ -2,6 +2,7 @@ package easygin
 
 import (
 	"context"
+	"fmt"
 	"net/http/pprof"
 	"os"
 
@@ -28,18 +29,31 @@ func NewServer(addr string, debug bool) *Server {
 		debug: debug,
 	}
 
-	// 非调试模式下设置Gin为发布模式，减少日志输出
-	if !s.debug {
-		gin.SetMode(gin.ReleaseMode)
-	}
-
 	// 设置默认监听地址
 	if s.addr == "" {
 		s.addr = ":80"
 	}
 
 	// 创建默认的Gin引擎，包含Logger和Recovery中间件
-	s.engine = gin.Default()
+	gin.SetMode(gin.ReleaseMode)
+	s.engine = gin.New()
+	s.engine.Use(gin.Recovery())
+	s.engine.Use(gin.LoggerWithFormatter(func(params gin.LogFormatterParams) string {
+		// 定义日志格式
+		return fmt.Sprintf(`{"time":"%s","level":"INFO","tag":"access","remote_ip":"%s","cost":"%v","method":"%s","request_uri":"%s","user_agent":"%s","status":"%d","span":"%s","traceID":"%s","spanID":"%s","parentTraceID":"%s"}`+"\n",
+			params.TimeStamp.Format("2006-01-02T15:04:05Z"),
+			params.ClientIP,
+			params.Latency,
+			params.Method,
+			params.Path,
+			params.Request.UserAgent(),
+			params.StatusCode,
+			params.Request.Header.Get("Span"),
+			params.Request.Header.Get("TraceID"),
+			params.Request.Header.Get("SpanID"),
+			params.Request.Header.Get("ParentTraceID"),
+		)
+	}))
 
 	return s
 }
@@ -114,6 +128,11 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 	// 注册所有路由组
 	for _, group := range groups {
 		handleGroup(rootGroup, group)
+	}
+
+	// 设置Gin模式为调试模式
+	if s.debug {
+		gin.SetMode(gin.DebugMode)
 	}
 
 	// 启动HTTP服务器
