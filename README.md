@@ -16,6 +16,7 @@
 - 🔗 路由组嵌套支持
 - 📁 文件上传下载支持
 - 🔄 重定向支持
+- 🔒 中间件支持
 
 ## 快速开始
 
@@ -66,12 +67,12 @@ var RouterRoot = easygin.NewRouterGroup("/")
 var RouterServer = easygin.NewRouterGroup("/server")
 ```
 
-在用户模块中定义用户路由组：
+在用户模块中定义用户路由组，并添加认证中间件：
 
 ```go
 package user
 
-var RouterRoot = easygin.NewRouterGroup("/user")
+var RouterRoot = easygin.NewRouterGroup("/user", &middleware.MustAuth{})
 ```
 
 在文件模块中定义文件路由组：
@@ -334,6 +335,42 @@ return nil, easygin.NewError(404, "user not found", "detailed error message")
 ```
 
 第一个参数是HTTP状态码，第二个参数是错误标题，第三个参数是详细错误信息。
+
+### 中间件支持
+
+easygin 支持在路由组级别添加中间件，中间件会应用到该路由组及其所有子路由：
+
+```go
+// 定义中间件
+type MustAuth struct{}
+
+func (MustAuth) Method() string {
+    return "ANY"
+}
+
+func (MustAuth) Path() string {
+    return ""
+}
+
+func (m *MustAuth) Output(ctx context.Context) (any, error) {
+    // 从请求头获取token
+    token := ctx.Value("token")
+    if token == nil || token.(string) == "" {
+        return nil, easygin.NewError(401, "Unauthorized", "token is required")
+    }
+    // 验证通过，继续处理请求
+    return nil, nil
+}
+
+// 在路由组定义时添加中间件
+var RouterUser = easygin.NewRouterGroup("/user", &middleware.MustAuth{})
+```
+
+中间件会按照注册顺序执行，可以注册多个中间件：
+
+```go
+var RouterUser = easygin.NewRouterGroup("/user", &middleware.MustAuth{}, &middleware.Logger{})
+```   
 
 ### 生成静态参数绑定方法
 

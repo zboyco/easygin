@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http/pprof"
 	"os"
+	"reflect"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -40,18 +42,14 @@ func NewServer(addr string, debug bool) *Server {
 	s.engine.Use(gin.Recovery())
 	s.engine.Use(gin.LoggerWithFormatter(func(params gin.LogFormatterParams) string {
 		// 定义日志格式
-		return fmt.Sprintf(`{"time":"%s","level":"INFO","tag":"access","remote_ip":"%s","cost":"%v","method":"%s","request_uri":"%s","user_agent":"%s","status":"%d","span":"%s","traceID":"%s","spanID":"%s","parentTraceID":"%s"}`+"\n",
+		return fmt.Sprintf(`{"time":"%s","level":"INFO","tag":"access","remote_ip":"%s","cost":"%v","method":"%s","request_uri":"%s","status":"%d","user_agent":"%s"}`+"\n",
 			params.TimeStamp.Format("2006-01-02T15:04:05Z"),
 			params.ClientIP,
 			params.Latency,
 			params.Method,
 			params.Path,
-			params.Request.UserAgent(),
 			params.StatusCode,
-			params.Request.Header.Get("Span"),
-			params.Request.Header.Get("TraceID"),
-			params.Request.Header.Get("SpanID"),
-			params.Request.Header.Get("ParentTraceID"),
+			params.Request.UserAgent(),
 		)
 	}))
 
@@ -75,6 +73,8 @@ func pprofRegister(e *gin.RouterGroup) {
 	debug.GET("/heap", gin.WrapH(pprof.Handler("heap")))                 // 堆内存分析
 	debug.GET("/mutex", gin.WrapH(pprof.Handler("mutex")))               // 互斥锁分析
 	debug.GET("/threadcreate", gin.WrapH(pprof.Handler("threadcreate"))) // 线程创建分析
+	fmt.Println("[EasyGin] GET /debug/pprof")
+	fmt.Println("[EasyGin]     pprof")
 }
 
 // Run 启动HTTP服务器并注册路由组
@@ -93,20 +93,6 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 	if len(args) > 1 && args[1] == "openapi" {
 		GenerateOpenAPI(groups...)
 		return nil
-	}
-
-	// 打印JSON请求体验证和默认值设置的状态提示
-	println()
-	if !HandleBodyJsonOmitEmptyAndDefault() {
-		println("[EasyGin Tips]: HandleBodyJsonOmitEmptyAndDefault is false.")
-		println("[EasyGin Tips]: The JSON in the request body will not be validated for empty values, and default values will not be set.")
-		println("[EasyGin Tips]: If you want to use the validation and default value features, please use easygin.SetHandleBodyJsonOmitEmptyAndDefault to set.")
-		println()
-	} else {
-		println("[EasyGin Tips]: HandleBodyJsonOmitEmptyAndDefault is true.")
-		println("[EasyGin Tips]: The JSON in the request body will be validated for empty values and default values will be set.")
-		println("[EasyGin Tips]: This feature uses runtime reflection, which may lead to some performance degradation.")
-		println()
 	}
 
 	// 创建根路由组
@@ -130,9 +116,28 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 		handleGroup(rootGroup, group)
 	}
 
+	// 打印JSON请求体验证和默认值设置的状态提示
+	println()
+	if !HandleBodyJsonOmitEmptyAndDefault() {
+		println("[EasyGin] Tips: HandleBodyJsonOmitEmptyAndDefault is false.")
+		println("[EasyGin] Tips: The JSON in the request body will not be validated for empty values, and default values will not be set.")
+		println("[EasyGin] Tips: If you want to use the validation and default value features, please use easygin.SetHandleBodyJsonOmitEmptyAndDefault to set.")
+		println()
+	} else {
+		println("[EasyGin] Tips: HandleBodyJsonOmitEmptyAndDefault is true.")
+		println("[EasyGin] Tips: The JSON in the request body will be validated for empty values and default values will be set.")
+		println("[EasyGin] Tips: This feature uses runtime reflection, which may lead to some performance degradation.")
+		println()
+	}
+
 	// 设置Gin模式为调试模式
 	if s.debug {
 		gin.SetMode(gin.DebugMode)
+	}
+
+	if !s.debug {
+		// 打印服务器启动信息
+		fmt.Printf("[EasyGin] Listening and serving HTTP on %s\n", s.addr)
 	}
 
 	// 启动HTTP服务器
@@ -146,6 +151,7 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 func handleGroup(e *gin.RouterGroup, group *RouterGroup) {
 	// 创建当前路由组
 	g := e.Group(group.path)
+	basePath := g.BasePath()
 
 	// 注册中间件
 	for _, handler := range group.middlewares {
@@ -159,8 +165,45 @@ func handleGroup(e *gin.RouterGroup, group *RouterGroup) {
 		g.Use(renderMiddleware(handler))
 	}
 
-	// 注册API
+	// 注册API并收集路由信息
 	for _, handler := range group.apis {
+		// 获取处理器名称
+		handlerName := getHandlerName(handler)
+
+		// 获取路由路径，处理可能的双斜杠问题
+		path := handler.Path()
+		routePath := basePath
+		if path != "" {
+			if strings.HasPrefix(path, "/") && strings.HasSuffix(basePath, "/") {
+				routePath += path[1:] // 如果basePath以/结尾且path以/开头，则去掉path的前导斜杠
+			} else if !strings.HasPrefix(path, "/") && !strings.HasSuffix(basePath, "/") {
+				routePath += "/" + path // 如果basePath不以/结尾且path不以/开头，则添加/
+			} else {
+				routePath += path
+			}
+		}
+
+		// 获取HTTP方法
+		method := handler.Method()
+		// 获取API描述
+		description := getHandlerDescription(handler)
+
+		// 打印路由信息
+		if description != "" {
+			fmt.Printf("[EasyGin] %s %s %s\n", getShortMethod(method), routePath, description)
+		} else {
+			fmt.Printf("[EasyGin] %s %s\n", getShortMethod(method), routePath)
+		}
+
+		// 打印中间件和处理器
+		middlewareNames := getMiddlewareNames(group.middlewares)
+		if len(middlewareNames) > 0 {
+			fmt.Printf("[EasyGin]     %s %s\n", strings.Join(middlewareNames, " "), handlerName)
+		} else {
+			fmt.Printf("[EasyGin]     %s\n", handlerName)
+		}
+
+		// 注册路由
 		if ginHandler, ok := handler.(GinHandler); ok {
 			// 处理实现了GinHandler接口的API
 			if handler.Method() == "ANY" {
@@ -181,6 +224,67 @@ func handleGroup(e *gin.RouterGroup, group *RouterGroup) {
 	for _, sub := range group.children {
 		handleGroup(g, sub)
 	}
+}
+
+// getShortMethod 获取HTTP方法的简短表示
+func getShortMethod(method string) string {
+	return strings.ToUpper(method)[:3]
+}
+
+// getHandlerName 获取处理器的名称
+func getHandlerName(handler RouterHandler) string {
+	// 使用反射获取处理器的类型名称
+	t := reflect.TypeOf(handler)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	// 返回包名.结构体名
+	return fmt.Sprintf("%s.%s", t.PkgPath()[strings.LastIndex(t.PkgPath(), "/")+1:], t.Name())
+}
+
+// getHandlerDescription 获取处理器的描述信息
+func getHandlerDescription(handler RouterHandler) string {
+	// 尝试从结构体标签中获取summary
+	t := reflect.TypeOf(handler)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	if t.Kind() == reflect.Struct {
+		// 遍历结构体字段
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+			fieldType := field.Type
+
+			// 检查字段类型是否实现了Method() string接口
+			methodType, ok := fieldType.MethodByName("Method")
+			if !ok {
+				continue
+			}
+
+			// 验证Method方法的签名是否为 Method() string
+			if methodType.Type.NumIn() != 1 || methodType.Type.NumOut() != 1 || methodType.Type.Out(0).Kind() != reflect.String {
+				continue
+			}
+
+			// 检查字段是否有summary标签
+			if summary, ok := field.Tag.Lookup("summary"); ok {
+				return summary
+			}
+		}
+	}
+
+	return ""
+}
+
+// getMiddlewareNames 获取中间件名称列表
+func getMiddlewareNames(middlewares []RouterHandler) []string {
+	var names []string
+	for _, middleware := range middlewares {
+		names = append(names, getHandlerName(middleware))
+	}
+	return names
 }
 
 // WithGinHandlers 添加全局Gin中间件
