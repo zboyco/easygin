@@ -288,9 +288,16 @@ func bindParams(c *gin.Context, h RouterHandler) (RouterHandler, error) {
 	return newHandler, nil
 }
 
+const (
+	contextKeyHandlerName = "easyginHandlerName"
+)
+
 // renderAPI 处理API
-func renderAPI(h RouterHandler) gin.HandlerFunc {
+func renderAPI(h RouterHandler, handlerName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 将handlerName存入context
+		c.Set(contextKeyHandlerName, handlerName)
+
 		output, err := handleRouter(c, h)
 		if err != nil {
 			handleError(c, err)

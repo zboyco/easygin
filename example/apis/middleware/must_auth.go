@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/zboyco/easygin"
 )
@@ -31,7 +30,7 @@ func (req *MustAuth) Output(ctx context.Context) (any, error) {
 		return nil, ErrNotLogin
 	}
 
-	fmt.Println(req.Authorization, req.AuthorizationInQuery)
+	// fmt.Println(req.Authorization, req.AuthorizationInQuery)
 
 	return &UserInfo{
 		ID:   1,

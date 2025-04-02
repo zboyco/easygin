@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/zboyco/easygin"
+	"github.com/zboyco/easygin/logr"
 )
 
 func init() {
@@ -24,6 +25,9 @@ func (ListUser) Path() string {
 func (req *ListUser) Output(ctx context.Context) (any, error) {
 	fmt.Println(req.Name)
 	fmt.Println(req.AgeMin)
+
+	logr.FromContext(ctx).Info("test log")
+
 	return []RespGetUser{{
 		ID:   1,
 		Name: "someone",

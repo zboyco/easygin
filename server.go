@@ -9,26 +9,34 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
+
+var serviceName = "easygin"
 
 // Server 封装gin.Engine，提供端口和调试模式配置
 // 负责管理HTTP服务器的生命周期和路由注册
 type Server struct {
 	engine          *gin.Engine                               // Gin引擎实例
 	contextInjector func(ctx context.Context) context.Context // 上下文注入函数
+	customExporters []sdktrace.SpanExporter
 
-	addr  string // 监听地址，如":8080"
-	debug bool   // 调试模式标志，影响日志级别和pprof启用
+	serviceName string // 服务名称，用于标识追踪器
+	addr        string // 监听地址，如":8080"
+	debug       bool   // 调试模式标志，影响日志级别和pprof启用
 }
 
 // NewServer 创建一个新的Server实例
 //
+//	serviceName: 服务名称，用于标识追踪器
 //	addr: 监听地址，默认为":80"
 //	debug: 调试模式，true启用调试功能，false为生产模式
-func NewServer(addr string, debug bool) *Server {
+func NewServer(serviceName, addr string, debug bool) *Server {
 	s := &Server{
-		addr:  addr,
-		debug: debug,
+		serviceName: serviceName,
+		addr:        addr,
+		debug:       debug,
 	}
 
 	// 设置默认监听地址
@@ -39,19 +47,6 @@ func NewServer(addr string, debug bool) *Server {
 	// 创建默认的Gin引擎，包含Logger和Recovery中间件
 	gin.SetMode(gin.ReleaseMode)
 	s.engine = gin.New()
-	s.engine.Use(gin.Recovery())
-	s.engine.Use(gin.LoggerWithFormatter(func(params gin.LogFormatterParams) string {
-		// 定义日志格式
-		return fmt.Sprintf(`{"time":"%s","level":"INFO","tag":"access","remote_ip":"%s","cost":"%v","method":"%s","request_uri":"%s","status":"%d","user_agent":"%s"}`+"\n",
-			params.TimeStamp.Format("2006-01-02T15:04:05Z"),
-			params.ClientIP,
-			params.Latency,
-			params.Method,
-			params.Path,
-			params.StatusCode,
-			params.Request.UserAgent(),
-		)
-	}))
 
 	return s
 }
@@ -103,6 +98,18 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 		// 添加pprof接口
 		pprofRegister(rootGroup)
 	}
+
+	// 初始化OpenTelemetry追踪器
+	s.initTracerProvider()
+
+	// 添加OpenTelemetry中间件
+	rootGroup.Use(otelgin.Middleware(s.serviceName))
+
+	// 添加自定义的日志中间件
+	rootGroup.Use(middleLogger())
+
+	// 添加Gin的Recovery中间件
+	rootGroup.Use(gin.Recovery())
 
 	// 注册上下文注入中间件
 	if s.contextInjector != nil {
@@ -217,7 +224,7 @@ func handleGroup(e *gin.RouterGroup, group *RouterGroup) {
 		}
 
 		// 处理实现了RouterHandler接口的API
-		g.Handle(handler.Method(), handler.Path(), renderAPI(handler))
+		g.Handle(handler.Method(), handler.Path(), renderAPI(handler, handlerName))
 	}
 
 	// 递归处理子路由组

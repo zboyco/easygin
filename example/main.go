@@ -6,6 +6,6 @@ import (
 )
 
 func main() {
-	srv := easygin.NewServer(":80", true)
+	srv := easygin.NewServer("srv-example", ":80", true)
 	srv.Run(apis.RouterRoot)
 }
