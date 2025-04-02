@@ -42,9 +42,9 @@ func middleLogger() gin.HandlerFunc {
 		// 调用下一个中间件或处理函数
 		c.Next()
 
-		handlerName := c.GetString(contextKeyHandlerName)
-		if handlerName != "" {
-			span.SetAttributes(attribute.String("operator", handlerName))
+		operatorName := c.GetString(contextKeyOperatorName)
+		if operatorName != "" {
+			span.SetAttributes(attribute.String("operator", operatorName))
 		}
 
 		// 处理日志级别，可通过 x-log-level 请求头自定义

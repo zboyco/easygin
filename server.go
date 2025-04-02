@@ -175,7 +175,7 @@ func handleGroup(e *gin.RouterGroup, group *RouterGroup) {
 	// 注册API并收集路由信息
 	for _, handler := range group.apis {
 		// 获取处理器名称
-		handlerName := getHandlerName(handler)
+		operatorName := getHandlerName(handler)
 
 		// 获取路由路径，处理可能的双斜杠问题
 		path := handler.Path()
@@ -205,9 +205,9 @@ func handleGroup(e *gin.RouterGroup, group *RouterGroup) {
 		// 打印中间件和处理器
 		middlewareNames := getMiddlewareNames(group.middlewares)
 		if len(middlewareNames) > 0 {
-			fmt.Printf("[EasyGin]     %s %s\n", strings.Join(middlewareNames, " "), handlerName)
+			fmt.Printf("[EasyGin]     %s %s\n", strings.Join(middlewareNames, " "), operatorName)
 		} else {
-			fmt.Printf("[EasyGin]     %s\n", handlerName)
+			fmt.Printf("[EasyGin]     %s\n", operatorName)
 		}
 
 		// 注册路由
@@ -215,16 +215,16 @@ func handleGroup(e *gin.RouterGroup, group *RouterGroup) {
 			// 处理实现了GinHandler接口的API
 			if handler.Method() == "ANY" {
 				// 注册处理所有HTTP方法的路由
-				g.Any(handler.Path(), ginHandler.GinHandle())
+				g.Any(handler.Path(), renderGinHandler(ginHandler, operatorName))
 			} else {
 				// 注册处理特定HTTP方法的路由
-				g.Handle(handler.Method(), handler.Path(), ginHandler.GinHandle())
+				g.Handle(handler.Method(), handler.Path(), renderGinHandler(ginHandler, operatorName))
 			}
 			continue
 		}
 
 		// 处理实现了RouterHandler接口的API
-		g.Handle(handler.Method(), handler.Path(), renderAPI(handler, handlerName))
+		g.Handle(handler.Method(), handler.Path(), renderAPI(handler, operatorName))
 	}
 
 	// 递归处理子路由组

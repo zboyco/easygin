@@ -126,6 +126,7 @@ func (e *stdoutSpanExporter) ExportSpans(ctx context.Context, spans []sdktrace.R
 				"net.protocol.version": true,
 				"http.route":           true,
 				"http.status_code":     true,
+				"net.host.port":        true,
 			}
 
 			// 过滤掉不需要的 span 属性

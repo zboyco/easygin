@@ -289,14 +289,14 @@ func bindParams(c *gin.Context, h RouterHandler) (RouterHandler, error) {
 }
 
 const (
-	contextKeyHandlerName = "easyginHandlerName"
+	contextKeyOperatorName = "easyginContextOperatorName"
 )
 
 // renderAPI 处理API
-func renderAPI(h RouterHandler, handlerName string) gin.HandlerFunc {
+func renderAPI(h RouterHandler, operatorName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 将handlerName存入context
-		c.Set(contextKeyHandlerName, handlerName)
+		// 将operatorName存入context
+		c.Set(contextKeyOperatorName, operatorName)
 
 		output, err := handleRouter(c, h)
 		if err != nil {
@@ -385,6 +385,14 @@ func renderMiddleware(h RouterHandler) gin.HandlerFunc {
 		}
 
 		c.Next()
+	}
+}
+
+func renderGinHandler(h GinHandler, operatorName string) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		// 将operatorName存入context
+		ctx.Set(contextKeyOperatorName, operatorName)
+		h.GinHandle()(ctx)
 	}
 }
 
