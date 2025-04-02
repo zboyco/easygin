@@ -372,8 +372,11 @@ func renderAPI(h RouterHandler, operatorName string) gin.HandlerFunc {
 }
 
 // renderMiddleware 处理中间件
-func renderMiddleware(h RouterHandler) gin.HandlerFunc {
+func renderMiddleware(h RouterHandler, operatorName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 将operatorName存入context
+		c.Set(contextKeyOperatorName, operatorName)
+
 		output, err := handleRouter(c, h)
 		if err != nil {
 			handleError(c, err)

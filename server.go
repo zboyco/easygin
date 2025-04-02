@@ -160,16 +160,22 @@ func handleGroup(e *gin.RouterGroup, group *RouterGroup) {
 	g := e.Group(group.path)
 	basePath := g.BasePath()
 
+	middlewareNames := make([]string, 0, len(group.middlewares))
+
 	// 注册中间件
 	for _, handler := range group.middlewares {
+		// 获取处理器名称
+		operatorName := getHandlerName(handler)
+		middlewareNames = append(middlewareNames, operatorName)
+
 		if ginHandler, ok := handler.(GinHandler); ok {
 			// 处理实现了GinHandler接口的中间件
-			g.Use(ginHandler.GinHandle())
+			g.Use(renderGinHandler(ginHandler, operatorName))
 			continue
 		}
 
 		// 处理实现了RouterHandler接口的中间件
-		g.Use(renderMiddleware(handler))
+		g.Use(renderMiddleware(handler, operatorName))
 	}
 
 	// 注册API并收集路由信息
@@ -203,7 +209,6 @@ func handleGroup(e *gin.RouterGroup, group *RouterGroup) {
 		}
 
 		// 打印中间件和处理器
-		middlewareNames := getMiddlewareNames(group.middlewares)
 		if len(middlewareNames) > 0 {
 			fmt.Printf("[EasyGin]     %s %s\n", strings.Join(middlewareNames, " "), operatorName)
 		} else {
@@ -283,15 +288,6 @@ func getHandlerDescription(handler RouterHandler) string {
 	}
 
 	return ""
-}
-
-// getMiddlewareNames 获取中间件名称列表
-func getMiddlewareNames(middlewares []RouterHandler) []string {
-	var names []string
-	for _, middleware := range middlewares {
-		names = append(names, getHandlerName(middleware))
-	}
-	return names
 }
 
 // WithGinHandlers 添加全局Gin中间件
