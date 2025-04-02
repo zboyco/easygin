@@ -65,7 +65,6 @@ func middleLogger() gin.HandlerFunc {
 			"cost", duration, // 请求耗时
 			"method", c.Request.Method, // HTTP 方法
 			"request_uri", c.Request.URL.RequestURI(), // 请求 URI
-			"user_agent", c.Request.UserAgent(), // 用户代理
 			"status", c.Writer.Status(), // HTTP 状态码
 		}
 
