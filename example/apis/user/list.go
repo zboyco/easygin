@@ -28,6 +28,10 @@ func (req *ListUser) Output(ctx context.Context) (any, error) {
 
 	logr.FromContext(ctx).Info("test log")
 
+	// panic("test panic")
+
+	// return nil, errors.New("test error")
+
 	return []RespGetUser{{
 		ID:   1,
 		Name: "someone",

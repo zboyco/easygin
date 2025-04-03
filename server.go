@@ -3,6 +3,7 @@ package easygin
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/http/pprof"
 	"os"
 	"reflect"
@@ -109,7 +110,25 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 	rootGroup.Use(middleLogger())
 
 	// 添加Gin的Recovery中间件
-	rootGroup.Use(gin.Recovery())
+	rootGroup.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
+		var e error
+		// 记录错误日志
+		switch v := err.(type) {
+		case error:
+			e = v
+		default:
+			e = fmt.Errorf("%v", err)
+		}
+
+		_ = c.Error(e)
+
+		resp := &gin.H{
+			"code": http.StatusInternalServerError,
+			"msg":  http.StatusText(http.StatusInternalServerError),
+			"desc": e.Error(),
+		}
+		c.AbortWithStatusJSON(http.StatusInternalServerError, resp)
+	}))
 
 	// 注册上下文注入中间件
 	if s.contextInjector != nil {

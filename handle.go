@@ -37,24 +37,27 @@ var structFields sync.Map
 
 // handleError 统一处理错误响应
 func handleError(c *gin.Context, err error) {
+	// 将错误添加到 gin.Context 的 Errors 中
+	_ = c.Error(err)
+
 	// 从对象池获取响应对象
 	resp := errorResponsePool.Get().(*gin.H)
 	defer errorResponsePool.Put(resp)
 
 	if errorHttp, ok := err.(ErrorHttp); ok {
 		*resp = gin.H{
-			"code": errorHttp.Code(),
+			"code": errorHttp.StatusCode(),
 			"msg":  errorHttp.Error(),
 			"desc": errorHttp.Desc(),
 		}
-		c.AbortWithStatusJSON(errorHttp.Code(), *resp)
+		c.AbortWithStatusJSON(errorHttp.StatusCode(), *resp)
 		return
 	}
 
 	*resp = gin.H{
 		"code": 500,
-		"msg":  "Internal Server Error",
-		"desc": err.Error(),
+		"msg":  err.Error(),
+		"desc": "Internal Server Error",
 	}
 	c.AbortWithStatusJSON(500, *resp)
 }
@@ -406,7 +409,7 @@ func handleRouter(c *gin.Context, h RouterHandler) (any, error) {
 	// 绑定参数
 	newHandler, err := bindParams(c, h)
 	if err != nil {
-		return nil, NewError(400, "Invalid Parameters", err.Error())
+		return nil, NewError(http.StatusBadRequest, err.Error(), "invalid parameters")
 	}
 
 	// 将gin.Context添加到context中

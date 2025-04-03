@@ -39,61 +39,64 @@ func middleLogger() gin.HandlerFunc {
 		ctx = logr.WithLogger(ctx, log)
 		// 更新请求上下文
 		c.Request = c.Request.WithContext(ctx)
-		// 调用下一个中间件或处理函数
-		c.Next()
 
-		operatorName := c.GetString(contextKeyOperatorName)
-		if operatorName != "" {
-			span.SetAttributes(attribute.String("operator", operatorName))
-		}
+		defer func() {
+			operatorName := c.GetString(contextKeyOperatorName)
+			if operatorName != "" {
+				span.SetAttributes(attribute.String("operator", operatorName))
+			}
 
-		// 处理日志级别，可通过 x-log-level 请求头自定义
-		var level zerolog.Level
-		_ = level.UnmarshalText([]byte(c.Request.Header.Get("x-log-level")))
-		// 如果未指定日志级别，默认使用 TraceLevel（最详细级别）
-		if level == zerolog.NoLevel {
-			level = zerolog.TraceLevel
-		}
+			// 处理日志级别，可通过 x-log-level 请求头自定义
+			var level zerolog.Level
+			_ = level.UnmarshalText([]byte(c.Request.Header.Get("x-log-level")))
+			// 如果未指定日志级别，默认使用 TraceLevel（最详细级别）
+			if level == zerolog.NoLevel {
+				level = zerolog.TraceLevel
+			}
 
-		// 计算请求处理总耗时
-		duration := time.Since(startAt)
+			// 计算请求处理总耗时
+			duration := time.Since(startAt)
 
-		// 构建日志字段，包含请求的关键信息
-		keyAndValues := []interface{}{
-			"tag", "access", // 标记为访问日志
-			"remote_ip", c.ClientIP(), // 客户端 IP
-			"cost", duration, // 请求耗时
-			"method", c.Request.Method, // HTTP 方法
-			"request_uri", c.Request.URL.RequestURI(), // 请求 URI
-			"status", c.Writer.Status(), // HTTP 状态码
-		}
+			// 构建日志字段，包含请求的关键信息
+			keyAndValues := []interface{}{
+				"tag", "access", // 标记为访问日志
+				"remote_ip", c.ClientIP(), // 客户端 IP
+				"cost", duration, // 请求耗时
+				"method", c.Request.Method, // HTTP 方法
+				"request_uri", c.Request.URL.RequestURI(), // 请求 URI
+				"status", c.Writer.Status(), // HTTP 状态码
+			}
 
-		// 获取请求处理过程中可能发生的错误
-		var err error
-		errs := c.Errors.ByType(gin.ErrorTypePrivate)
-		if len(errs) > 0 {
-			err = errs[0].Err
-		}
+			// 获取请求处理过程中可能发生的错误
+			var err error
+			errs := c.Errors.ByType(gin.ErrorTypePrivate)
+			if len(errs) > 0 {
+				err = errs[0].Err
+			}
 
-		// 根据错误状态和日志级别记录不同级别的日志
-		if err != nil {
-			if c.Writer.Status() >= http.StatusInternalServerError {
-				// 5xx 错误记录为 ERROR 级别
-				if level <= zerolog.ErrorLevel {
-					log.WithValues(keyAndValues...).Error(err)
+			// 根据错误状态和日志级别记录不同级别的日志
+			if err != nil {
+				if c.Writer.Status() >= http.StatusInternalServerError {
+					// 5xx 错误记录为 ERROR 级别
+					if level <= zerolog.ErrorLevel {
+						log.WithValues(keyAndValues...).Error(err)
+					}
+				} else {
+					// 4xx 等其他错误记录为 WARN 级别
+					if level <= zerolog.WarnLevel {
+						log.WithValues(keyAndValues...).Warn(err)
+					}
 				}
 			} else {
-				// 4xx 等其他错误记录为 WARN 级别
-				if level <= zerolog.WarnLevel {
-					log.WithValues(keyAndValues...).Warn(err)
+				// 正常请求记录为 INFO 级别
+				if level <= zerolog.InfoLevel {
+					log.WithValues(keyAndValues...).Info("")
 				}
 			}
-		} else {
-			// 正常请求记录为 INFO 级别
-			if level <= zerolog.InfoLevel {
-				log.WithValues(keyAndValues...).Info("")
-			}
-		}
+		}()
+
+		// 调用下一个中间件或处理函数
+		c.Next()
 	}
 }
 

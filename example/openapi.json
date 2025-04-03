@@ -4,7 +4,7 @@
       "GithubComZboycoEasyginError": {
         "properties": {
           "code": {
-            "description": "错误码",
+            "description": "状态码",
             "type": "integer"
           },
           "desc": {
@@ -35,10 +35,18 @@
               "$ref": "#/components/schemas/MimeMultipartFileHeader"
             },
             "type": "array"
+          },
+          "tags": {
+            "description": "Tags",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
-          "file"
+          "file",
+          "tags"
         ],
         "type": "object"
       },
@@ -203,6 +211,20 @@
       "get": {
         "parameters": [
           {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "authorization",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "User Name",
             "in": "query",
             "name": "name",
@@ -250,6 +272,22 @@
         ]
       },
       "post": {
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "authorization",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -293,6 +331,20 @@
     "/server/user/{id}": {
       "get": {
         "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "authorization",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "description": "User token",
             "in": "header",

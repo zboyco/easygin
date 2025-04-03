@@ -8,10 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (r *Download) EasyGinBindParameters(c *gin.Context) error {
-	return nil
-}
-
 func (r *Image) EasyGinBindParameters(c *gin.Context) error {
 	return nil
 }
@@ -65,6 +61,10 @@ func (r *UploadFile) EasyGinBindParameters(c *gin.Context) error {
 			return errors.New("missing required parameter 'tags' in form")
 		}
 	}
+	return nil
+}
+
+func (r *Download) EasyGinBindParameters(c *gin.Context) error {
 	return nil
 }
 
