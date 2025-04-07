@@ -307,8 +307,8 @@ import (
 )
 
 func main() {
-    // 创建服务器，指定端口和是否启用OpenAPI
-    srv := easygin.NewServer(":8080", true)
+    // 创建服务器，指定服务名称、端口和是否启用调试模式
+    srv := easygin.NewServer("srv-example", ":8080", true)
     
     // 运行服务，注册根路由组
     srv.Run(apis.RouterRoot)

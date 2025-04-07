@@ -12,6 +12,12 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
 )
 
+func init() {
+	// 初始化全局 TracerProvider，使用 "easygin" 作为服务名称
+	// 这个 TracerProvider 会在整个应用程序中被共享
+	initTracerProvider("easygin")
+}
+
 // SetCustomTracing 设置自定义的追踪器
 // 参数:
 //   - exporters: 一个或多个自定义的 span 导出器，用于将追踪数据发送到不同的后端系统
@@ -22,7 +28,12 @@ func (s *Server) SetCustomTracing(exporters ...sdktrace.SpanExporter) {
 // initTracerProvider 初始化OpenTelemetry追踪，使用W3C Trace Context标准
 // 该方法配置全局的 TracerProvider，设置资源属性、采样策略和导出器
 // 所有的追踪数据都将通过这里配置的导出器发送出去
-func (s *Server) initTracerProvider() {
+func initTracerProvider(serviceName string, customExporters ...sdktrace.SpanExporter) {
+	// 尝试关闭现有的 TracerProvider 以释放资源
+	if provider, ok := otel.GetTracerProvider().(*sdktrace.TracerProvider); ok {
+		_ = provider.Shutdown(context.Background())
+	}
+
 	// 设置全局传播器为W3C Trace Context标准
 	// 这确保了追踪上下文可以在不同服务之间正确传递
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
@@ -34,11 +45,11 @@ func (s *Server) initTracerProvider() {
 	opts := []sdktrace.TracerProviderOption{
 		// 设置资源属性，用于标识服务和遥测数据
 		sdktrace.WithResource(resource.NewWithAttributes(
-			semconv.SchemaURL,                                    // 语义约定的 Schema URL
-			semconv.ServiceNameKey.String(s.serviceName),         // 服务名称
-			semconv.TelemetrySDKLanguageGo,                       // 使用的编程语言
+			semconv.SchemaURL,                                     // 语义约定的 Schema URL
+			semconv.ServiceNameKey.String(serviceName),            // 服务名称
+			semconv.TelemetrySDKLanguageGo,                        // 使用的编程语言
 			semconv.TelemetrySDKVersionKey.String(otel.Version()), // SDK 版本
-			semconv.TelemetrySDKNameKey.String("opentelemetry"),  // SDK 名称
+			semconv.TelemetrySDKNameKey.String("opentelemetry"),   // SDK 名称
 		)),
 		// 设置采样策略，决定哪些 span 会被记录
 		sdktrace.WithSampler(sdktrace.ParentBased(
@@ -52,7 +63,7 @@ func (s *Server) initTracerProvider() {
 
 	// 添加用户自定义的 Exporter 选项
 	// 这允许将追踪数据同时发送到多个后端系统
-	for _, exporter := range s.customExporters {
+	for _, exporter := range customExporters {
 		opts = append(opts, sdktrace.WithBatcher(exporter))
 	}
 
