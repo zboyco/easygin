@@ -312,8 +312,8 @@ func main() {
     // 初始化全局跟踪器，指定服务名称，用于链路追踪和日志记录
     easygin.InitGlobalTracerProvider(serverName)
 
-	// 设置日志等级为DebugLevel
-	easygin.SetLogLevel(easygin.DebugLevel)
+    // 设置日志等级为DebugLevel
+    easygin.SetLogLevel(easygin.DebugLevel)
 
     // 创建服务器，指定服务名称、端口和是否启用调试模式
     srv := easygin.NewServer(serviceName, ":8080", true)
