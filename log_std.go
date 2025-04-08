@@ -6,71 +6,8 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog"
-	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
-
-type OutputType string
-
-var (
-	OutputAlways    OutputType = "Always"
-	OutputOnFailure OutputType = "OnFailure"
-	OutputNever     OutputType = "Never"
-)
-
-func OutputFilter(outputType OutputType) SpanMapper {
-	return func(data sdktrace.ReadOnlySpan) sdktrace.ReadOnlySpan {
-		if outputType == OutputNever {
-			return nil
-		}
-		if outputType == OutputOnFailure {
-			if data.Status().Code == codes.Ok {
-				return nil
-			}
-		}
-		return data
-	}
-}
-
-type SpanMapper = func(data sdktrace.ReadOnlySpan) sdktrace.ReadOnlySpan
-
-func WithSpanMapExporter(mappers ...SpanMapper) func(spanExporter sdktrace.SpanExporter) sdktrace.SpanExporter {
-	return func(spanExporter sdktrace.SpanExporter) sdktrace.SpanExporter {
-		return &spanMapExporter{
-			mappers:      mappers,
-			SpanExporter: spanExporter,
-		}
-	}
-}
-
-type spanMapExporter struct {
-	mappers []SpanMapper
-	sdktrace.SpanExporter
-}
-
-func (e *spanMapExporter) ExportSpans(ctx context.Context, spanData []sdktrace.ReadOnlySpan) error {
-	finalSpanSnapshot := make([]sdktrace.ReadOnlySpan, 0)
-
-	mappers := e.mappers
-
-	for i := range spanData {
-		data := spanData[i]
-
-		for _, m := range mappers {
-			data = m(data)
-		}
-
-		if data != nil {
-			finalSpanSnapshot = append(finalSpanSnapshot, data)
-		}
-	}
-
-	if len(finalSpanSnapshot) == 0 {
-		return nil
-	}
-
-	return e.SpanExporter.ExportSpans(ctx, finalSpanSnapshot)
-}
 
 func StdoutSpanExporter() sdktrace.SpanExporter {
 	return &stdoutSpanExporter{}
@@ -97,8 +34,8 @@ func (e *stdoutSpanExporter) ExportSpans(ctx context.Context, spans []sdktrace.R
 				continue
 			}
 
-			// 使用zerolog，输出至stdout
-			logger := zerolog.New(os.Stdout).With().Logger()
+			// 使用zerolog，输出至stderr
+			logger := zerolog.New(os.Stderr).With().Logger()
 			logr := (&logger).Log().Time("time", event.Time).Str("level", strings.ToUpper(lv.String()))
 
 			for _, kv := range event.Attributes {

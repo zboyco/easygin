@@ -11,7 +11,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 var serviceName = "easygin"
@@ -21,7 +20,6 @@ var serviceName = "easygin"
 type Server struct {
 	engine          *gin.Engine                               // Gin引擎实例
 	contextInjector func(ctx context.Context) context.Context // 上下文注入函数
-	customExporters []sdktrace.SpanExporter
 
 	serviceName string // 服务名称，用于标识追踪器
 	addr        string // 监听地址，如":8080"
@@ -99,10 +97,6 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 		// 添加pprof接口
 		pprofRegister(rootGroup)
 	}
-
-	// 初始化OpenTelemetry追踪器
-	// 重新初始化一个全局的TracerProvider，用于追踪HTTP请求
-	initTracerProvider(s.serviceName, s.customExporters...)
 
 	// 添加OpenTelemetry中间件
 	rootGroup.Use(otelgin.Middleware(s.serviceName))

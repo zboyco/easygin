@@ -15,20 +15,15 @@ import (
 func init() {
 	// 初始化全局 TracerProvider，使用 "easygin" 作为服务名称
 	// 这个 TracerProvider 会在整个应用程序中被共享
-	initTracerProvider("easygin")
+	InitGlobalTracerProvider("easygin")
 }
 
-// SetCustomTracing 设置自定义的追踪器
-// 参数:
-//   - exporters: 一个或多个自定义的 span 导出器，用于将追踪数据发送到不同的后端系统
-func (s *Server) SetCustomTracing(exporters ...sdktrace.SpanExporter) {
-	s.customExporters = exporters
-}
-
-// initTracerProvider 初始化OpenTelemetry追踪，使用W3C Trace Context标准
+// InitGlobalTracerProvider 初始化W3C Trace Context标准的OpenTelemetry追踪
 // 该方法配置全局的 TracerProvider，设置资源属性、采样策略和导出器
-// 所有的追踪数据都将通过这里配置的导出器发送出去
-func initTracerProvider(serviceName string, customExporters ...sdktrace.SpanExporter) {
+// 其中StdoutSpanExporter 用于将追踪数据输出到控制台
+// 可以根据需要添加自定义的导出器，如Jaeger或Zipkin
+// 也可以不使用该方法，自定义创建全局追踪器
+func InitGlobalTracerProvider(serviceName string, customExporters ...sdktrace.SpanExporter) {
 	// 尝试关闭现有的 TracerProvider 以释放资源
 	if provider, ok := otel.GetTracerProvider().(*sdktrace.TracerProvider); ok {
 		_ = provider.Shutdown(context.Background())

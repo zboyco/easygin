@@ -307,14 +307,25 @@ import (
 )
 
 func main() {
+    serviceName := "srv-example"
+
+    // 初始化全局跟踪器，指定服务名称，用于链路追踪和日志记录
+    easygin.InitGlobalTracerProvider(serverName)
+
+	// 设置日志等级为DebugLevel
+	easygin.SetLogLevel(easygin.DebugLevel)
+
     // 创建服务器，指定服务名称、端口和是否启用调试模式
-    srv := easygin.NewServer("srv-example", ":8080", true)
+    srv := easygin.NewServer(serviceName, ":8080", true)
     
     // 运行服务，注册根路由组
     srv.Run(apis.RouterRoot)
 }
 ```
-
+> easygin 内部使用了 OpenTelemetry 进行链路追踪和日志记录，默认会初始化服务名为"easygin"的全局跟踪器。  
+> 如果需要自定义服务名称，可以使用 `easygin.InitGlobalTracerProvider` 方法进行初始化。  
+> `easygin.StdoutSpanExporter()` 方法用于创建一个标准输出的SpanExporter，用于将追踪信息输出到控制台。
+> 如果不使用`easygin.InitGlobalTracerProvider`，可以自定义全局跟踪器的配置，例如指定Trace标准、采样率、采样策略等。
 
 ## 高级特性
 

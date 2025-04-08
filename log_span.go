@@ -9,13 +9,60 @@ import (
 	"github.com/zboyco/easygin/logr"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
 
-var l = zerolog.InfoLevel
+// 全局日志等级
+var globalLogLevel = zerolog.InfoLevel
 
-func SetLevel(lvl zerolog.Level) {
-	l = lvl
+// SetLogLevel 设置全局日志等级
+func SetLogLevel(l Level) {
+	globalLogLevel = zerolog.Level(l)
+}
+
+type Level int8
+
+const (
+	// DebugLevel defines debug log level.
+	DebugLevel Level = iota
+	// InfoLevel defines info log level.
+	InfoLevel
+	// WarnLevel defines warn log level.
+	WarnLevel
+	// ErrorLevel defines error log level.
+	ErrorLevel
+)
+
+func (l Level) String() string {
+	return zerolog.Level(l).String()
+}
+
+// ParseLevel converts a level string into a Level value.
+// returns an error if the input string does not match known values.
+func ParseLevel(levelStr string) (Level, error) {
+	l, err := zerolog.ParseLevel(levelStr)
+	if err != nil {
+		return InfoLevel, err
+	}
+	return Level(l), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler to allow for easy reading from toml/yaml/json formats
+func (l *Level) UnmarshalText(text []byte) error {
+	var zl zerolog.Level
+	err := zl.UnmarshalText(text)
+	if err != nil {
+		return err
+	}
+
+	*l = Level(zl)
+	return nil
+}
+
+// MarshalText implements encoding.TextMarshaler to allow for easy writing into toml/yaml/json formats
+func (l Level) MarshalText() ([]byte, error) {
+	return zerolog.Level(l).MarshalText()
 }
 
 func SpanLogger(serviceName string, span trace.Span) logr.Logger {
@@ -55,7 +102,7 @@ func (t *spanLogger) WithValues(keyAndValues ...interface{}) logr.Logger {
 }
 
 func (t *spanLogger) info(level zerolog.Level, msg fmt.Stringer) {
-	if level < l {
+	if level < globalLogLevel {
 		t.ignore = true
 		return
 	}
@@ -73,7 +120,7 @@ func (t *spanLogger) info(level zerolog.Level, msg fmt.Stringer) {
 }
 
 func (t *spanLogger) error(level zerolog.Level, err error) {
-	if level < l {
+	if level < globalLogLevel {
 		t.ignore = true
 		return
 	}
@@ -144,4 +191,35 @@ func (p *printer) String() string {
 		return p.format
 	}
 	return fmt.Sprintf(p.format, p.args...)
+}
+
+type SpanMapper = func(data sdktrace.ReadOnlySpan) sdktrace.ReadOnlySpan
+
+type spanMapExporter struct {
+	mappers []SpanMapper
+	sdktrace.SpanExporter
+}
+
+func (e *spanMapExporter) ExportSpans(ctx context.Context, spanData []sdktrace.ReadOnlySpan) error {
+	finalSpanSnapshot := make([]sdktrace.ReadOnlySpan, 0)
+
+	mappers := e.mappers
+
+	for i := range spanData {
+		data := spanData[i]
+
+		for _, m := range mappers {
+			data = m(data)
+		}
+
+		if data != nil {
+			finalSpanSnapshot = append(finalSpanSnapshot, data)
+		}
+	}
+
+	if len(finalSpanSnapshot) == 0 {
+		return nil
+	}
+
+	return e.SpanExporter.ExportSpans(ctx, finalSpanSnapshot)
 }
