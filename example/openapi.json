@@ -328,6 +328,47 @@
         ]
       }
     },
+    "/server/user/sub/list": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Sub Size",
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sub Offset",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubComZboycoEasyginError"
+                }
+              }
+            },
+            "description": "Default response with error"
+          }
+        },
+        "summary": "Get sub list",
+        "tags": [
+          "/server/user/sub"
+        ]
+      }
+    },
     "/server/user/{id}": {
       "get": {
         "parameters": [
@@ -421,6 +462,10 @@
     {
       "description": "APIs",
       "name": "/server/user"
+    },
+    {
+      "description": "APIs",
+      "name": "/server/user/sub"
     }
   ]
 }

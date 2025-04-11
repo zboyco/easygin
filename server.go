@@ -169,12 +169,16 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 // 参数:
 //   - e: 父路由组
 //   - group: 要处理的路由组
-func handleGroup(e *gin.RouterGroup, group *RouterGroup) {
+//   - parentMiddlewareNames: 父路由组的中间件名称列表
+func handleGroup(e *gin.RouterGroup, group *RouterGroup, parentMiddlewareNames ...string) {
 	// 创建当前路由组
 	g := e.Group(group.path)
 	basePath := g.BasePath()
 
-	middlewareNames := make([]string, 0, len(group.middlewares))
+	middlewareNames := make([]string, 0, len(parentMiddlewareNames)+len(group.middlewares))
+
+	// 添加父路由组的中间件名称
+	middlewareNames = append(middlewareNames, parentMiddlewareNames...)
 
 	// 注册中间件
 	for _, handler := range group.middlewares {
@@ -246,9 +250,9 @@ func handleGroup(e *gin.RouterGroup, group *RouterGroup) {
 		g.Handle(handler.Method(), handler.Path(), renderAPI(handler, operatorName))
 	}
 
-	// 递归处理子路由组
+	// 递归处理子路由组，传递当前路由组的中间件名称
 	for _, sub := range group.children {
-		handleGroup(g, sub)
+		handleGroup(g, sub, middlewareNames...)
 	}
 }
 
