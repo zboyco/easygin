@@ -332,6 +332,20 @@
       "get": {
         "parameters": [
           {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "authorization",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Sub Size",
             "in": "query",
             "name": "size",

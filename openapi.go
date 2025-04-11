@@ -133,15 +133,18 @@ func generateSchema(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3
 	return generateSchemaValue(doc, t, isMultipart)
 }
 
-func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string) error {
+func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, parentMiddlewareParams ...*openapi3.ParameterRef) error {
 	// 处理当前组的路径前缀
 	basePath := filepath.Join(parentPath, group.path)
 
 	// 标记是否需要为当前组创建标签
 	hasApis := false
 
-	// 处理中间件参数
-	var middlewareParams []*openapi3.ParameterRef
+	// 处理中间件参数，首先复制父级中间件参数
+	middlewareParams := make([]*openapi3.ParameterRef, len(parentMiddlewareParams))
+	copy(middlewareParams, parentMiddlewareParams)
+
+	// 处理当前组的中间件参数
 	for _, middleware := range group.middlewares {
 		middlewareType := reflect.TypeOf(middleware)
 		if middlewareType.Kind() == reflect.Ptr {
@@ -309,9 +312,9 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string) 
 		processStructFields(doc, apiType, op, nil)
 	}
 
-	// 递归处理子组
+	// 递归处理子组，传递当前组的中间件参数
 	for _, subGroup := range group.children {
-		if err := generateGroupPaths(doc, subGroup, basePath); err != nil {
+		if err := generateGroupPaths(doc, subGroup, basePath, middlewareParams...); err != nil {
 			return err
 		}
 	}
@@ -556,26 +559,26 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 					if baseType.PkgPath() != "" {
 						schemaName := snakeToPascalCase(baseType.PkgPath() + "." + baseType.Name())
 						// 修改：直接创建引用而不使用allOf
-						schema := openapi3.NewObjectSchema()
-						schema.Extensions = make(map[string]interface{})
+						newSchema := openapi3.NewObjectSchema()
+						newSchema.Extensions = make(map[string]interface{})
 
 						// 添加一个title，帮助识别这是一个引用
-						schema.Title = schemaName
+						newSchema.Title = schemaName
 
-						schema.Extensions["$ref"] = "#/components/schemas/" + schemaName
+						newSchema.Extensions["$ref"] = "#/components/schemas/" + schemaName
 
 						schemaRef = &openapi3.SchemaRef{
-							Value: schema,
+							Value: newSchema,
 						}
 					} else {
 						// 如果没有包路径，创建一个简单的对象
-						schema := openapi3.NewObjectSchema()
+						newSchema := openapi3.NewObjectSchema()
 						if desc != "" {
-							schema.Description = desc
+							newSchema.Description = desc
 						}
-						schema.Title = "循环引用对象"
+						newSchema.Title = "循环引用对象"
 						schemaRef = &openapi3.SchemaRef{
-							Value: schema,
+							Value: newSchema,
 						}
 					}
 				} else {

@@ -17,13 +17,13 @@
   4. 将文档序列化为 JSON 并保存到文件
 
 ### generateGroupPaths
-- 签名: `func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string) error`
+- 签名: `func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, parentMiddlewareParams ...*openapi3.ParameterRef) error`
 - 功能: 递归处理路由组，生成 OpenAPI 路径信息
 - 处理内容:
-  1. 处理中间件参数
+  1. 处理中间件参数，包括继承父路由组的中间件参数
   2. 遍历组中的 API，生成路径和操作
   3. 处理标签和响应
-  4. 递归处理子组
+  4. 递归处理子组，传递当前组的中间件参数
 
 ### processStructFields
 - 签名: `func processStructFields(doc *openapi3.T, t reflect.Type, op *openapi3.Operation, processedTypes map[reflect.Type]bool)`
@@ -121,6 +121,7 @@
    - 递归遍历路由组树
    - 为每个组创建标签
    - 处理中间件参数
+   - 子路由组继承父路由组的中间件参数
 
 2. **API 处理**:
    - 提取 HTTP 方法和路径
