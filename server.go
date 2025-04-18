@@ -18,8 +18,9 @@ var serviceName = "easygin"
 // Server 封装gin.Engine，提供端口和调试模式配置
 // 负责管理HTTP服务器的生命周期和路由注册
 type Server struct {
-	engine          *gin.Engine                               // Gin引擎实例
-	contextInjector func(ctx context.Context) context.Context // 上下文注入函数
+	engine           *gin.Engine                               // Gin引擎实例
+	customMiddleware []gin.HandlerFunc                         // 自定义中间件列表
+	contextInjector  func(ctx context.Context) context.Context // 上下文注入函数
 
 	serviceName string // 服务名称，用于标识追踪器
 	addr        string // 监听地址，如":8080"
@@ -33,9 +34,10 @@ type Server struct {
 //	debug: 调试模式，true启用调试功能，false为生产模式
 func NewServer(serviceName, addr string, debug bool) *Server {
 	s := &Server{
-		serviceName: serviceName,
-		addr:        addr,
-		debug:       debug,
+		serviceName:      serviceName,
+		addr:             addr,
+		debug:            debug,
+		customMiddleware: make([]gin.HandlerFunc, 0),
 	}
 
 	// 设置默认监听地址
@@ -53,7 +55,7 @@ func NewServer(serviceName, addr string, debug bool) *Server {
 // pprofRegister 注册pprof性能分析路由
 // 参数e为要注册pprof路由的RouterGroup
 // 注册后可通过/debug/pprof/访问性能分析工具
-func pprofRegister(e *gin.RouterGroup) {
+func pprofRegister(e *gin.Engine) {
 	// 注册pprof路由
 	debug := e.Group("/debug/pprof")
 	debug.GET("/", gin.WrapF(pprof.Index))                               // pprof首页
@@ -89,23 +91,20 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 		return nil
 	}
 
-	// 创建根路由组
-	rootGroup := s.engine.Group("/")
-
 	// 调试模式下注册pprof路由
 	if s.debug {
 		// 添加pprof接口
-		pprofRegister(rootGroup)
+		pprofRegister(s.engine)
 	}
 
 	// 添加OpenTelemetry中间件
-	rootGroup.Use(otelgin.Middleware(s.serviceName))
+	s.engine.Use(otelgin.Middleware(s.serviceName))
 
 	// 添加自定义的日志中间件
-	rootGroup.Use(middleLogger())
+	s.engine.Use(middleLogger())
 
 	// 添加Gin的Recovery中间件
-	rootGroup.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
+	s.engine.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
 		var e error
 		// 记录错误日志
 		switch v := err.(type) {
@@ -125,16 +124,21 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, resp)
 	}))
 
+	// 注册自定义的中间件
+	if len(s.customMiddleware) > 0 {
+		s.engine.Use(s.customMiddleware...)
+	}
+
 	// 注册上下文注入中间件
 	if s.contextInjector != nil {
-		rootGroup.Use(func(c *gin.Context) {
+		s.engine.Use(func(c *gin.Context) {
 			c.Request = c.Request.WithContext(s.contextInjector(c.Request.Context()))
 		})
 	}
 
 	// 注册所有路由组
 	for _, group := range groups {
-		handleGroup(rootGroup, group)
+		handleGroup(&s.engine.RouterGroup, group)
 	}
 
 	// 打印JSON请求体验证和默认值设置的状态提示
@@ -308,10 +312,10 @@ func getHandlerDescription(handler RouterHandler) string {
 	return ""
 }
 
-// WithGinHandlers 添加全局Gin中间件
-// 参数handlers为要添加的Gin中间件列表
-func (s *Server) WithGinHandlers(handlers ...gin.HandlerFunc) {
-	_ = s.engine.Use(handlers...)
+// WithGinMiddleware 添加全局Gin中间件
+// 参数middlewares为要添加的Gin中间件列表
+func (s *Server) WithGinMiddleware(middleware ...gin.HandlerFunc) {
+	s.customMiddleware = append(s.customMiddleware, middleware...)
 }
 
 // WithContextInjector 设置上下文注入函数
