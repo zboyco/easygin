@@ -510,6 +510,7 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 			var name string
 			var desc string
 			var isRequired bool = true
+			var jsonType string
 
 			// 检查是否是multipart表单字段
 			if isMultipart {
@@ -531,12 +532,14 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 				if jsonTag != "" {
 					tagParts := strings.Split(jsonTag, ",")
 					name = tagParts[0]
-					// 检查是否包含omitempty
+					// 检查是否包含omitempty和类型指定
 					if len(tagParts) > 1 {
 						for _, opt := range tagParts[1:] {
 							if opt == "omitempty" {
 								isRequired = false
-								break
+							} else if opt == "string" || opt == "number" || opt == "boolean" {
+								// 保存JSON类型指定
+								jsonType = opt
 							}
 						}
 					}
@@ -583,8 +586,27 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 					}
 				} else {
 					// 对于非自嵌套类型，正常处理
-					schemaRef = &openapi3.SchemaRef{
-						Value: generateSchema(doc, field.Type, isMultipart),
+					// 如果有JSON类型指定，则使用指定的类型
+					if jsonType != "" {
+						var typeSchema *openapi3.Schema
+						switch jsonType {
+						case "string":
+							typeSchema = openapi3.NewStringSchema()
+						case "number":
+							typeSchema = openapi3.NewFloat64Schema()
+						case "boolean":
+							typeSchema = openapi3.NewBoolSchema()
+						default:
+							// 默认使用常规处理
+							typeSchema = generateSchema(doc, field.Type, isMultipart)
+						}
+						schemaRef = &openapi3.SchemaRef{
+							Value: typeSchema,
+						}
+					} else {
+						schemaRef = &openapi3.SchemaRef{
+							Value: generateSchema(doc, field.Type, isMultipart),
+						}
 					}
 				}
 

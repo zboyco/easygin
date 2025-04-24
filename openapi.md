@@ -47,14 +47,15 @@
 ### generateSchemaValue
 - 签名: `func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3.Schema`
 - 功能: 根据 Go 类型生成 OpenAPI Schema 值
-- 支持类型:
-  1. 结构体 (对象)
+- 特性:
+  1. 处理结构体 (对象)
   2. 基本类型 (字符串、整数、浮点数、布尔值)
   3. 数组和切片
   4. Map 类型
   5. 特殊处理 time.Time 和 multipart.FileHeader
   6. 接口类型处理
   7. 特殊处理自嵌套类型，使用 `$ref` 扩展字段直接引用
+  8. 支持根据 JSON 标签中的类型指定（如 `json:"field,string"`）生成相应的 OpenAPI 类型
 
 ## 辅助函数
 

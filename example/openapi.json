@@ -56,6 +56,10 @@
             "description": "User Age",
             "type": "integer"
           },
+          "ageString": {
+            "description": "User Age",
+            "type": "string"
+          },
           "name": {
             "description": "User Name",
             "type": "string"
@@ -63,15 +67,28 @@
         },
         "required": [
           "name",
-          "age"
+          "age",
+          "ageString"
         ],
         "type": "object"
       },
       "GithubComZboycoEasyginExampleApisUserRespGetUser": {
         "properties": {
+          "active": {
+            "description": "User Active",
+            "type": "boolean"
+          },
+          "activeString": {
+            "description": "User Active",
+            "type": "string"
+          },
           "id": {
             "description": "User ID",
             "type": "integer"
+          },
+          "idString": {
+            "description": "User ID",
+            "type": "string"
           },
           "name": {
             "description": "User Name",
@@ -80,7 +97,10 @@
         },
         "required": [
           "id",
-          "name"
+          "idString",
+          "name",
+          "active",
+          "activeString"
         ],
         "type": "object"
       },

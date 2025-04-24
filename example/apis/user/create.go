@@ -16,8 +16,9 @@ type CreateUser struct {
 }
 
 type ReqCreateUser struct {
-	Name string `json:"name" desc:"User Name"`
-	Age  int    `json:"age" desc:"User Age"`
+	Name      string `json:"name" desc:"User Name"`
+	Age       int    `json:"age" desc:"User Age"`
+	AgeString int    `json:"ageString,string" desc:"User Age"`
 }
 
 func (CreateUser) Path() string {
