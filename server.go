@@ -187,23 +187,23 @@ func handleGroup(e *gin.RouterGroup, group *RouterGroup, parentMiddlewareNames .
 	// 注册中间件
 	for _, handler := range group.middlewares {
 		// 获取处理器名称
-		operatorName := getHandlerName(handler)
-		middlewareNames = append(middlewareNames, operatorName)
+		handlerName := getHandlerName(handler)
+		middlewareNames = append(middlewareNames, handlerName)
 
 		if ginHandler, ok := handler.(GinHandler); ok {
 			// 处理实现了GinHandler接口的中间件
-			g.Use(renderGinHandler(ginHandler, operatorName))
+			g.Use(renderGinHandler(ginHandler, handlerName))
 			continue
 		}
 
 		// 处理实现了RouterHandler接口的中间件
-		g.Use(renderMiddleware(handler, operatorName))
+		g.Use(renderMiddleware(handler, handlerName))
 	}
 
 	// 注册API并收集路由信息
 	for _, handler := range group.apis {
 		// 获取处理器名称
-		operatorName := getHandlerName(handler)
+		handlerName := getHandlerName(handler)
 
 		// 获取路由路径，处理可能的双斜杠问题
 		path := handler.Path()
@@ -232,9 +232,9 @@ func handleGroup(e *gin.RouterGroup, group *RouterGroup, parentMiddlewareNames .
 
 		// 打印中间件和处理器
 		if len(middlewareNames) > 0 {
-			fmt.Printf("[EasyGin]     %s %s\n", strings.Join(middlewareNames, " "), operatorName)
+			fmt.Printf("[EasyGin]     %s %s\n", strings.Join(middlewareNames, " "), handlerName)
 		} else {
-			fmt.Printf("[EasyGin]     %s\n", operatorName)
+			fmt.Printf("[EasyGin]     %s\n", handlerName)
 		}
 
 		// 注册路由
@@ -242,16 +242,16 @@ func handleGroup(e *gin.RouterGroup, group *RouterGroup, parentMiddlewareNames .
 			// 处理实现了GinHandler接口的API
 			if handler.Method() == "ANY" {
 				// 注册处理所有HTTP方法的路由
-				g.Any(handler.Path(), renderGinHandler(ginHandler, operatorName))
+				g.Any(handler.Path(), renderGinHandler(ginHandler, handlerName))
 			} else {
 				// 注册处理特定HTTP方法的路由
-				g.Handle(handler.Method(), handler.Path(), renderGinHandler(ginHandler, operatorName))
+				g.Handle(handler.Method(), handler.Path(), renderGinHandler(ginHandler, handlerName))
 			}
 			continue
 		}
 
 		// 处理实现了RouterHandler接口的API
-		g.Handle(handler.Method(), handler.Path(), renderAPI(handler, operatorName))
+		g.Handle(handler.Method(), handler.Path(), renderAPI(handler, handlerName))
 	}
 
 	// 递归处理子路由组，传递当前路由组的中间件名称
@@ -267,7 +267,7 @@ func getShortMethod(method string) string {
 
 // getHandlerName 获取处理器的名称
 func getHandlerName(handler RouterHandler) string {
-	// 使用反射获取处理器的类型名称
+	// 使用反射获取
 	t := reflect.TypeOf(handler)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()

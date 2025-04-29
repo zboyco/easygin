@@ -41,9 +41,9 @@ func middleLogger() gin.HandlerFunc {
 		c.Request = c.Request.WithContext(ctx)
 
 		defer func() {
-			operatorName := c.GetString(contextKeyOperatorName)
-			if operatorName != "" {
-				span.SetAttributes(attribute.String("operator", operatorName))
+			handlerName := HandlerNameFromContext(c.Request.Context())
+			if handlerName != "" {
+				span.SetAttributes(attribute.String("handler", handlerName))
 			}
 
 			// 处理日志级别，可通过 x-log-level 请求头自定义

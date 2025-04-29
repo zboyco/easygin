@@ -291,15 +291,11 @@ func bindParams(c *gin.Context, h RouterHandler) (RouterHandler, error) {
 	return newHandler, nil
 }
 
-const (
-	contextKeyOperatorName = "easyginContextOperatorName"
-)
-
 // renderAPI 处理API
-func renderAPI(h RouterHandler, operatorName string) gin.HandlerFunc {
+func renderAPI(h RouterHandler, handlerName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 将operatorName存入context
-		c.Set(contextKeyOperatorName, operatorName)
+		// 将handlerName存入context
+		c.Request = c.Request.WithContext(WithHandlerName(c.Request.Context(), handlerName))
 
 		output, err := handleRouter(c, h)
 		if err != nil {
@@ -375,10 +371,10 @@ func renderAPI(h RouterHandler, operatorName string) gin.HandlerFunc {
 }
 
 // renderMiddleware 处理中间件
-func renderMiddleware(h RouterHandler, operatorName string) gin.HandlerFunc {
+func renderMiddleware(h RouterHandler, handlerName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 将operatorName存入context
-		c.Set(contextKeyOperatorName, operatorName)
+		// 将handlerName存入context
+		c.Request = c.Request.WithContext(WithHandlerName(c.Request.Context(), handlerName))
 
 		output, err := handleRouter(c, h)
 		if err != nil {
@@ -394,15 +390,13 @@ func renderMiddleware(h RouterHandler, operatorName string) gin.HandlerFunc {
 	}
 }
 
-func renderGinHandler(h GinHandler, operatorName string) gin.HandlerFunc {
+func renderGinHandler(h GinHandler, handlerName string) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		// 将operatorName存入context
-		ctx.Set(contextKeyOperatorName, operatorName)
+		// 将handlerName存入context
+		ctx.Request = ctx.Request.WithContext(WithHandlerName(ctx.Request.Context(), handlerName))
 		h.GinHandle()(ctx)
 	}
 }
-
-type GinContextKey int
 
 // handleRouter 处理通用的RouterHandler逻辑，包括参数绑定和调用Handle方法
 func handleRouter(c *gin.Context, h RouterHandler) (any, error) {
@@ -413,18 +407,8 @@ func handleRouter(c *gin.Context, h RouterHandler) (any, error) {
 	}
 
 	// 将gin.Context添加到context中
-	ctx := c.Request.Context()
-	ctx = context.WithValue(ctx, GinContextKey(0), c)
 	// 调用Handle方法
-	return newHandler.Output(ctx)
-}
-
-func GinContextFromContext(ctx context.Context) *gin.Context {
-	raw := ctx.Value(GinContextKey(0))
-	if raw == nil {
-		return nil
-	}
-	return raw.(*gin.Context)
+	return newHandler.Output(WithGinContext(c.Request.Context(), c))
 }
 
 type Disposition string

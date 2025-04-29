@@ -94,23 +94,33 @@
   6. 处理默认值和必填参数验证
 
 ### 7. renderAPI
-- 签名: `func renderAPI(h RouterHandler) gin.HandlerFunc`
+- 签名: `func renderAPI(h RouterHandler, handlerName string) gin.HandlerFunc`
 - 功能: 处理API请求并生成响应
 - 处理内容:
-  1. 调用handleRouter处理请求
-  2. 处理自定义状态码
-  3. 根据返回值类型生成不同的响应
-  4. 支持多种响应类型 (JSON, 字符串, 重定向, 文件)
+  1. 将handlerName存入context
+  2. 调用handleRouter处理请求
+  3. 处理自定义状态码
+  4. 根据返回值类型生成不同的响应
+  5. 支持多种响应类型 (JSON, 字符串, 重定向, 文件)
 
 ### 8. renderMiddleware
-- 签名: `func renderMiddleware(h RouterHandler) gin.HandlerFunc`
+- 签名: `func renderMiddleware(h RouterHandler, handlerName string) gin.HandlerFunc`
 - 功能: 处理中间件逻辑
 - 处理内容:
-  1. 调用handleRouter处理请求
-  2. 将结果存入请求上下文
-  3. 继续处理后续中间件和路由
+  1. 将handlerName存入context
+  2. 调用handleRouter处理请求
+  3. 将结果存入请求上下文
+  4. 继续处理后续中间件和路由
 
-### 9. handleRouter
+### 9. renderGinHandler
+- 签名: `func renderGinHandler(h GinHandler, handlerName string) gin.HandlerFunc`
+- 功能: 处理原生Gin处理器
+- 处理内容:
+  1. 将handlerName存入context
+  2. 调用GinHandler的GinHandle方法获取原生gin.HandlerFunc
+  3. 执行原生处理器函数
+
+### 10. handleRouter
 - 签名: `func handleRouter(c *gin.Context, h RouterHandler) (any, error)`
 - 功能: 处理通用的RouterHandler逻辑
 - 处理内容:
