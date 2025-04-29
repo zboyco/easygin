@@ -295,7 +295,7 @@ func bindParams(c *gin.Context, h RouterHandler) (RouterHandler, error) {
 func renderAPI(h RouterHandler, handlerName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 将handlerName存入context
-		c.Request = c.Request.WithContext(WithHandlerName(c.Request.Context(), handlerName))
+		c.Request = c.Request.WithContext(ContextWithHandlerName(c.Request.Context(), handlerName))
 
 		output, err := handleRouter(c, h)
 		if err != nil {
@@ -374,7 +374,7 @@ func renderAPI(h RouterHandler, handlerName string) gin.HandlerFunc {
 func renderMiddleware(h RouterHandler, handlerName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 将handlerName存入context
-		c.Request = c.Request.WithContext(WithHandlerName(c.Request.Context(), handlerName))
+		c.Request = c.Request.WithContext(ContextWithHandlerName(c.Request.Context(), handlerName))
 
 		output, err := handleRouter(c, h)
 		if err != nil {
@@ -393,7 +393,7 @@ func renderMiddleware(h RouterHandler, handlerName string) gin.HandlerFunc {
 func renderGinHandler(h GinHandler, handlerName string) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		// 将handlerName存入context
-		ctx.Request = ctx.Request.WithContext(WithHandlerName(ctx.Request.Context(), handlerName))
+		ctx.Request = ctx.Request.WithContext(ContextWithHandlerName(ctx.Request.Context(), handlerName))
 		h.GinHandle()(ctx)
 	}
 }
@@ -408,7 +408,7 @@ func handleRouter(c *gin.Context, h RouterHandler) (any, error) {
 
 	// 将gin.Context添加到context中
 	// 调用Handle方法
-	return newHandler.Output(WithGinContext(c.Request.Context(), c))
+	return newHandler.Output(ContextWithGinContext(c.Request.Context(), c))
 }
 
 type Disposition string

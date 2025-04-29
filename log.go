@@ -28,7 +28,7 @@ func middleLogger() gin.HandlerFunc {
 		// 获取请求上下文
 		ctx := c.Request.Context()
 
-		// 从当前上下文中获取已存在的 span，而不是创建新的
+		// 从当前上下文中获取已存在的 span
 		// otelgin.Middleware 已经创建了 span 并将其放入上下文中
 		span := trace.SpanFromContext(ctx)
 

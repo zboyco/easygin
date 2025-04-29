@@ -19,6 +19,7 @@ var serviceName = "easygin"
 // 负责管理HTTP服务器的生命周期和路由注册
 type Server struct {
 	engine           *gin.Engine                               // Gin引擎实例
+	handlerMap       map[string]RouterAPI                      // 路由处理器映射
 	customMiddleware []gin.HandlerFunc                         // 自定义中间件列表
 	contextInjector  func(ctx context.Context) context.Context // 上下文注入函数
 
@@ -97,11 +98,34 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 		pprofRegister(s.engine)
 	}
 
+	// 初始化路由处理器映射
+	s.handlerMap = make(map[string]RouterAPI)
+
 	// 添加OpenTelemetry中间件
 	s.engine.Use(otelgin.Middleware(s.serviceName))
 
-	// 添加自定义的日志中间件
+	// 添加日志中间件
 	s.engine.Use(middleLogger())
+
+	// 添加404处理
+	s.engine.NoRoute(func(c *gin.Context) {
+		resp := &gin.H{
+			"code": http.StatusNotFound,
+			"msg":  "404 page not found",
+			"desc": "404 page not found",
+		}
+		c.AbortWithStatusJSON(http.StatusNotFound, resp)
+	})
+
+	// 添加请求主路由到上下文中
+	s.engine.Use(func(c *gin.Context) {
+		// 定位到主处理函数
+		mainHandler := s.handlerMap[fmt.Sprintf("%s %s", c.Request.Method, c.FullPath())]
+		if mainHandler != nil {
+			// 将路由添加到上下文中，以便后续处理函数使用
+			c.Request = c.Request.WithContext(ContextWithRoute(c.Request.Context(), mainHandler))
+		}
+	})
 
 	// 添加Gin的Recovery中间件
 	s.engine.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
@@ -138,7 +162,7 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 
 	// 注册所有路由组
 	for _, group := range groups {
-		handleGroup(&s.engine.RouterGroup, group)
+		handleGroup(s.handlerMap, &s.engine.RouterGroup, group)
 	}
 
 	// 打印JSON请求体验证和默认值设置的状态提示
@@ -174,7 +198,7 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 //   - e: 父路由组
 //   - group: 要处理的路由组
 //   - parentMiddlewareNames: 父路由组的中间件名称列表
-func handleGroup(e *gin.RouterGroup, group *RouterGroup, parentMiddlewareNames ...string) {
+func handleGroup(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *RouterGroup, parentMiddlewareNames ...string) {
 	// 创建当前路由组
 	g := e.Group(group.path)
 	basePath := g.BasePath()
@@ -201,7 +225,8 @@ func handleGroup(e *gin.RouterGroup, group *RouterGroup, parentMiddlewareNames .
 	}
 
 	// 注册API并收集路由信息
-	for _, handler := range group.apis {
+	for i := range group.apis {
+		handler := group.apis[i]
 		// 获取处理器名称
 		handlerName := getHandlerName(handler)
 
@@ -230,6 +255,13 @@ func handleGroup(e *gin.RouterGroup, group *RouterGroup, parentMiddlewareNames .
 			fmt.Printf("[EasyGin] %s %s\n", getShortMethod(method), routePath)
 		}
 
+		// 收集路由信息
+		key := fmt.Sprintf("%s %s", method, routePath)
+		if _, ok := handlerMap[key]; ok {
+			panic(fmt.Sprintf("duplicate route %s %s", method, routePath))
+		}
+		handlerMap[fmt.Sprintf("%s %s", method, routePath)] = handler
+
 		// 打印中间件和处理器
 		if len(middlewareNames) > 0 {
 			fmt.Printf("[EasyGin]     %s %s\n", strings.Join(middlewareNames, " "), handlerName)
@@ -256,7 +288,7 @@ func handleGroup(e *gin.RouterGroup, group *RouterGroup, parentMiddlewareNames .
 
 	// 递归处理子路由组，传递当前路由组的中间件名称
 	for _, sub := range group.children {
-		handleGroup(g, sub, middlewareNames...)
+		handleGroup(handlerMap, g, sub, middlewareNames...)
 	}
 }
 

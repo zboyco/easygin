@@ -8,8 +8,8 @@ import (
 
 type contextKey int
 
-// WithHandlerName 将处理器名称存储到上下文中
-func WithHandlerName(ctx context.Context, handlerName string) context.Context {
+// ContextWithHandlerName 将处理器名称存储到上下文中
+func ContextWithHandlerName(ctx context.Context, handlerName string) context.Context {
 	return context.WithValue(ctx, contextKey(0), handlerName)
 }
 
@@ -21,8 +21,8 @@ func HandlerNameFromContext(ctx context.Context) string {
 	return ""
 }
 
-// WithGinContext 将 gin.Context 存储到上下文中
-func WithGinContext(ctx context.Context, c *gin.Context) context.Context {
+// ContextWithGinContext 将 gin.Context 存储到上下文中
+func ContextWithGinContext(ctx context.Context, c *gin.Context) context.Context {
 	return context.WithValue(ctx, contextKey(1), c)
 }
 
@@ -33,4 +33,18 @@ func GinContextFromContext(ctx context.Context) *gin.Context {
 		return nil
 	}
 	return raw.(*gin.Context)
+}
+
+// ContextWithRoute 将 Route 存储到上下文中
+func ContextWithRoute(ctx context.Context, api RouterAPI) context.Context {
+	return context.WithValue(ctx, contextKey(2), api)
+}
+
+// RouteFromContext 从上下文中获取 RouterAPI
+func RouteFromContext(ctx context.Context) RouterAPI {
+	raw := ctx.Value(contextKey(2))
+	if raw == nil {
+		return nil
+	}
+	return raw.(RouterAPI)
 }

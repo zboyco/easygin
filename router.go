@@ -104,3 +104,13 @@ func (g *RouterGroup) RegisterAPI(api RouterAPI) {
 func (g *RouterGroup) RegisterGroup(group *RouterGroup) {
 	g.children = append(g.children, group)
 }
+
+// Children 返回当前路由组的子路由组列表
+func (g *RouterGroup) Children() []*RouterGroup {
+	return g.children
+}
+
+// APIs 返回当前路由组中的API列表
+func (g *RouterGroup) APIs() []RouterAPI {
+	return g.apis
+}
