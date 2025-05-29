@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -92,6 +93,20 @@ func generateSchema(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3
 		t = t.Elem()
 	}
 
+	// 特殊处理multipart.FileHeader类型及其衍生类型
+	if isFileHeaderTypeOrAlias(t) {
+		schema := openapi3.NewStringSchema()
+		schema.Format = "binary"
+		return schema
+	}
+
+	// 特殊处理time.Time及其衍生类型
+	if isTimeTypeOrAlias(t) {
+		schema := openapi3.NewStringSchema()
+		schema.Format = "date-time"
+		return schema
+	}
+
 	// 检查是否已经在components/schemas中定义过该类型
 	if t.Kind() == reflect.Struct && t.PkgPath() != "" {
 		// 将包路径和类型名转换为有效的组件名
@@ -170,11 +185,15 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, 
 					isRequired = false
 				}
 
+				// 获取desc标签的值
+				desc := field.Tag.Get("desc")
+
 				param := &openapi3.Parameter{
-					Name:     paramName,
-					In:       inTag,
-					Schema:   &openapi3.SchemaRef{Value: generateSchema(doc, field.Type, false)},
-					Required: isRequired,
+					Name:        paramName,
+					In:          inTag,
+					Schema:      &openapi3.SchemaRef{Value: generateSchema(doc, field.Type, false)},
+					Required:    isRequired,
+					Description: desc, // 设置描述信息
 				}
 				middlewareParams = append(middlewareParams, &openapi3.ParameterRef{Value: param})
 			}
@@ -460,6 +479,11 @@ func isTimeTypeOrAlias(t reflect.Type) bool {
 	return t.ConvertibleTo(timeType) && t.Kind() == timeType.Kind()
 }
 
+func isFileHeaderTypeOrAlias(t reflect.Type) bool {
+	timeType := reflect.TypeOf(multipart.FileHeader{})
+	return t.ConvertibleTo(timeType) && t.Kind() == timeType.Kind()
+}
+
 var doc *openapi3.T
 
 func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3.Schema {
@@ -469,20 +493,6 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 	baseType := t
 	if baseType.Kind() == reflect.Ptr {
 		baseType = baseType.Elem()
-	}
-
-	// 特殊处理multipart.FileHeader类型
-	if t.String() == "multipart.FileHeader" {
-		schema = openapi3.NewStringSchema()
-		schema.Format = "binary"
-		return schema
-	}
-
-	// 特殊处理time.Time及其衍生类型
-	if isTimeTypeOrAlias(t) {
-		schema = openapi3.NewStringSchema()
-		schema.Format = "date-time"
-		return schema
 	}
 
 	switch t.Kind() {

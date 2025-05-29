@@ -10,9 +10,9 @@ type MustAuthContextKey int
 
 type MustAuth struct {
 	// Bearer access_token
-	Authorization string `in:"header" name:"Authorization,omitempty"`
+	Authorization string `in:"header" name:"Authorization,omitempty" desc:"Bearer access_token"`
 	// Bearer access_token
-	AuthorizationInQuery string `in:"query" name:"authorization,omitempty" `
+	AuthorizationInQuery string `in:"query" name:"authorization,omitempty" desc:"Bearer access_token"`
 }
 
 type UserInfo struct {

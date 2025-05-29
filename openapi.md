@@ -39,10 +39,11 @@
 - 功能: 生成 OpenAPI Schema 对象
 - 特性:
   1. 处理指针类型
-  2. 将结构体类型添加到 components/schemas
-  3. 支持引用已定义的组件
-  4. 使用 `processedTypes` 映射跟踪已处理类型，避免无限递归
-  5. 对于已处理过的类型，直接使用 `$ref` 扩展字段返回引用，不使用 `allOf` 包装
+  2. 特殊处理 time.Time 和 multipart.FileHeader
+  3. 将结构体类型添加到 components/schemas
+  4. 支持引用已定义的组件
+  5. 使用 `processedTypes` 映射跟踪已处理类型，避免无限递归
+  6. 对于已处理过的类型，直接使用 `$ref` 扩展字段返回引用，不使用 `allOf` 包装
 
 ### generateSchemaValue
 - 签名: `func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3.Schema`
@@ -52,10 +53,9 @@
   2. 基本类型 (字符串、整数、浮点数、布尔值)
   3. 数组和切片
   4. Map 类型
-  5. 特殊处理 time.Time 和 multipart.FileHeader
-  6. 接口类型处理
-  7. 特殊处理自嵌套类型，使用 `$ref` 扩展字段直接引用
-  8. 支持根据 JSON 标签中的类型指定（如 `json:"field,string"`）生成相应的 OpenAPI 类型
+  5. 接口类型处理
+  6. 特殊处理自嵌套类型，使用 `$ref` 扩展字段直接引用
+  7. 支持根据 JSON 标签中的类型指定（如 `json:"field,string"`）生成相应的 OpenAPI 类型
 
 ## 辅助函数
 

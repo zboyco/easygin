@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/zboyco/easygin"
 	"github.com/zboyco/easygin/logr"
@@ -14,8 +15,9 @@ func init() {
 
 type ListUser struct {
 	easygin.MethodGet `summary:"Get user list" `
-	Name              string `in:"query" name:"name,omitempty" desc:"User Name"`
-	AgeMin            int    `in:"query" name:"ageMin,omitempty" default:"18" desc:"User Min Age"`
+	Name              string    `in:"query" name:"name,omitempty" desc:"User Name"`
+	AgeMin            int       `in:"query" name:"ageMin,omitempty" default:"18" desc:"User Min Age"`
+	StartTime         time.Time `in:"query" name:"startTime,omitempty" desc:"Start Time"`
 }
 
 func (ListUser) Path() string {

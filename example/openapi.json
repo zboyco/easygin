@@ -26,13 +26,15 @@
       "GithubComZboycoEasyginExampleApisFileReqUploadFile": {
         "properties": {
           "file": {
-            "$ref": "#/components/schemas/MimeMultipartFileHeader",
-            "description": "Upload File"
+            "description": "Upload File",
+            "format": "binary",
+            "type": "string"
           },
           "images": {
             "description": "Upload Images",
             "items": {
-              "$ref": "#/components/schemas/MimeMultipartFileHeader"
+              "format": "binary",
+              "type": "string"
             },
             "type": "array"
           },
@@ -103,10 +105,6 @@
           "activeString"
         ],
         "type": "object"
-      },
-      "MimeMultipartFileHeader": {
-        "format": "binary",
-        "type": "string"
       }
     }
   },
@@ -231,6 +229,7 @@
       "get": {
         "parameters": [
           {
+            "description": "Bearer access_token",
             "in": "header",
             "name": "Authorization",
             "schema": {
@@ -238,6 +237,7 @@
             }
           },
           {
+            "description": "Bearer access_token",
             "in": "query",
             "name": "authorization",
             "schema": {
@@ -258,6 +258,15 @@
             "name": "ageMin",
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "description": "Start Time",
+            "in": "query",
+            "name": "startTime",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
             }
           }
         ],
@@ -294,6 +303,7 @@
       "post": {
         "parameters": [
           {
+            "description": "Bearer access_token",
             "in": "header",
             "name": "Authorization",
             "schema": {
@@ -301,6 +311,7 @@
             }
           },
           {
+            "description": "Bearer access_token",
             "in": "query",
             "name": "authorization",
             "schema": {
@@ -352,6 +363,7 @@
       "get": {
         "parameters": [
           {
+            "description": "Bearer access_token",
             "in": "header",
             "name": "Authorization",
             "schema": {
@@ -359,6 +371,7 @@
             }
           },
           {
+            "description": "Bearer access_token",
             "in": "query",
             "name": "authorization",
             "schema": {
@@ -407,6 +420,7 @@
       "get": {
         "parameters": [
           {
+            "description": "Bearer access_token",
             "in": "header",
             "name": "Authorization",
             "schema": {
@@ -414,6 +428,7 @@
             }
           },
           {
+            "description": "Bearer access_token",
             "in": "query",
             "name": "authorization",
             "schema": {
