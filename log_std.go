@@ -53,17 +53,25 @@ func (e *stdoutSpanExporter) ExportSpans(ctx context.Context, spans []sdktrace.R
 
 			// 定义要过滤的字段列表，控制台不用输出这些字段
 			fieldsToFilter := map[string]bool{
-				"http.method":          true,
-				"http.scheme":          true,
-				"net.host.name":        true,
-				"net.sock.peer.addr":   true,
-				"net.sock.peer.port":   true,
-				"user_agent.original":  true,
-				"http.target":          true,
-				"net.protocol.version": true,
-				"http.route":           true,
-				"http.status_code":     true,
-				"net.host.port":        true,
+				"http.method":              true,
+				"http.scheme":              true,
+				"net.host.name":            true,
+				"net.sock.peer.addr":       true,
+				"net.sock.peer.port":       true,
+				"user_agent.original":      true,
+				"http.target":              true,
+				"net.protocol.version":     true,
+				"http.route":               true,
+				"http.status_code":         true,
+				"net.host.port":            true,
+				"server.address":           true,
+				"http.request.method":      true,
+				"url.scheme":               true,
+				"network.peer.address":     true,
+				"network.peer.port":        true,
+				"client.address":           true,
+				"url.path":                 true,
+				"network.protocol.version": true,
 			}
 
 			// 过滤掉不需要的 span 属性
