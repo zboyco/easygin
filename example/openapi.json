@@ -116,6 +116,7 @@
   "paths": {
     "/server/file/download": {
       "get": {
+        "operationId": "download",
         "responses": {
           "200": {
             "description": "Successful response"
@@ -139,6 +140,7 @@
     },
     "/server/file/image": {
       "get": {
+        "operationId": "image",
         "responses": {
           "200": {
             "description": "Successful response"
@@ -162,6 +164,7 @@
     },
     "/server/file/redirect": {
       "get": {
+        "operationId": "redirect",
         "parameters": [
           {
             "in": "query",
@@ -195,6 +198,7 @@
     },
     "/server/file/upload": {
       "post": {
+        "operationId": "uploadFile",
         "requestBody": {
           "content": {
             "multipart/form-data": {
@@ -227,6 +231,7 @@
     },
     "/server/user": {
       "get": {
+        "operationId": "listUser",
         "parameters": [
           {
             "description": "Bearer access_token",
@@ -301,6 +306,7 @@
         ]
       },
       "post": {
+        "operationId": "createUser",
         "parameters": [
           {
             "description": "Bearer access_token",
@@ -361,6 +367,7 @@
     },
     "/server/user/sub/list": {
       "get": {
+        "operationId": "listSub",
         "parameters": [
           {
             "description": "Bearer access_token",
@@ -418,6 +425,7 @@
     },
     "/server/user/{id}": {
       "get": {
+        "operationId": "getUser",
         "parameters": [
           {
             "description": "Bearer access_token",

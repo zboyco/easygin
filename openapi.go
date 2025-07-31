@@ -148,6 +148,21 @@ func generateSchema(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3
 	return generateSchemaValue(doc, t, isMultipart)
 }
 
+// generateOperationID 将API结构体名称转换为operationId格式（首字母小写的驼峰命名）
+func generateOperationID(apiType reflect.Type) string {
+	structName := apiType.Name()
+	if structName == "" {
+		return ""
+	}
+
+	// 将首字母转换为小写
+	if len(structName) == 1 {
+		return strings.ToLower(structName)
+	}
+
+	return strings.ToLower(structName[:1]) + structName[1:]
+}
+
 func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, parentMiddlewareParams ...*openapi3.ParameterRef) error {
 	// 处理当前组的路径前缀
 	basePath := filepath.Join(parentPath, group.path)
@@ -292,6 +307,9 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, 
 
 		// 获取 API 类型信息
 		apiType := reflect.TypeOf(api).Elem()
+
+		// 生成并设置 operationId
+		op.OperationID = generateOperationID(apiType)
 
 		// 获取 HTTP 方法和摘要
 		for i := 0; i < apiType.NumField(); i++ {
