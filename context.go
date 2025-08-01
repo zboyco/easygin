@@ -32,7 +32,11 @@ func GinContextFromContext(ctx context.Context) *gin.Context {
 	if raw == nil {
 		return nil
 	}
-	return raw.(*gin.Context)
+	// 使用安全的类型断言，避免panic
+	if ginCtx, ok := raw.(*gin.Context); ok {
+		return ginCtx
+	}
+	return nil
 }
 
 // ContextWithRoute 将 Route 存储到上下文中

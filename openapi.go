@@ -117,7 +117,7 @@ func generateSchema(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3
 			// 如果正在处理或已处理过，直接返回引用
 			return &openapi3.Schema{
 				// 不使用 AllOf，而是直接使用 $ref 字段
-				Extensions: map[string]interface{}{
+				Extensions: map[string]any{
 					"$ref": "#/components/schemas/" + schemaName,
 				},
 			}
@@ -139,7 +139,7 @@ func generateSchema(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3
 		// 返回对该类型的引用
 		return &openapi3.Schema{
 			// 不使用 AllOf，而是直接使用 $ref 字段
-			Extensions: map[string]interface{}{
+			Extensions: map[string]any{
 				"$ref": "#/components/schemas/" + schemaName,
 			},
 		}
@@ -591,7 +591,7 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 						schemaName := snakeToPascalCase(baseType.PkgPath() + "." + baseType.Name())
 						// 修改：直接创建引用而不使用allOf
 						newSchema := openapi3.NewObjectSchema()
-						newSchema.Extensions = make(map[string]interface{})
+						newSchema.Extensions = make(map[string]any)
 
 						// 添加一个title，帮助识别这是一个引用
 						newSchema.Title = schemaName

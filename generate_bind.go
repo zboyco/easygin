@@ -164,7 +164,7 @@ func processAllFields(builder *strings.Builder, t reflect.Type, prefix string, c
 // generatePathBinding 生成路径参数绑定代码
 func generatePathBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField) {
 	builder.WriteString(fmt.Sprintf("\t// 绑定路径参数 %s\n", paramName))
-	builder.WriteString(fmt.Sprintf("\t{\n")) // 添加代码块开始
+	builder.WriteString("\t{\n") // 添加代码块开始
 	builder.WriteString(fmt.Sprintf("\t\tpathVal := c.Param(\"%s\")\n", paramName))
 
 	// 根据字段类型添加零值检查
@@ -212,7 +212,7 @@ func generatePathBinding(builder *strings.Builder, fieldName, paramName string, 
 // generateQueryBinding 生成查询参数绑定代码
 func generateQueryBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField) {
 	builder.WriteString(fmt.Sprintf("\t// 绑定查询参数 %s\n", paramName))
-	builder.WriteString(fmt.Sprintf("\t{\n")) // 添加代码块开始
+	builder.WriteString("\t{\n") // 添加代码块开始
 	builder.WriteString(fmt.Sprintf("\t\tqueryVal := c.Query(\"%s\")\n", paramName))
 
 	// 根据字段类型添加零值检查
@@ -417,7 +417,7 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 
 func generateFormBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField) {
 	builder.WriteString(fmt.Sprintf("\t// 绑定表单参数 %s\n", paramName))
-	builder.WriteString(fmt.Sprintf("\t{\n")) // 添加代码块开始
+	builder.WriteString("\t{\n") // 添加代码块开始
 
 	// 检查是否可为空
 	tagNames := strings.Split(field.Tag.Get("name"), ",")
@@ -535,7 +535,7 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid time format for parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
-		builder.WriteString(indent + fmt.Sprintf("if !t.IsZero() {\n")) // 检查是否为零值
+		builder.WriteString(indent + "if !t.IsZero() {\n") // 检查是否为零值
 		builder.WriteString(indent + fmt.Sprintf("\t%s = t\n", fieldName))
 		builder.WriteString(indent + "}\n")
 		return
@@ -552,7 +552,7 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
-		builder.WriteString(indent + fmt.Sprintf("if intVal != 0 {\n")) // 检查是否为零值
+		builder.WriteString(indent + "if intVal != 0 {\n") // 检查是否为零值
 		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(intVal)\n", fieldName, fieldType.Name()))
 		builder.WriteString(indent + "}\n")
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
@@ -560,7 +560,7 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
-		builder.WriteString(indent + fmt.Sprintf("if uintVal != 0 {\n")) // 检查是否为零值
+		builder.WriteString(indent + "if uintVal != 0 {\n") // 检查是否为零值
 		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(uintVal)\n", fieldName, fieldType.Name()))
 		builder.WriteString(indent + "}\n")
 	case reflect.Float32, reflect.Float64:
@@ -568,7 +568,7 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
-		builder.WriteString(indent + fmt.Sprintf("if floatVal != 0 {\n")) // 检查是否为零值
+		builder.WriteString(indent + "if floatVal != 0 {\n") // 检查是否为零值
 		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(floatVal)\n", fieldName, fieldType.Name()))
 		builder.WriteString(indent + "}\n")
 	case reflect.Bool:
@@ -576,7 +576,7 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
-		builder.WriteString(indent + fmt.Sprintf("if boolVal {\n")) // 检查是否为零值
+		builder.WriteString(indent + "if boolVal {\n") // 检查是否为零值
 		builder.WriteString(indent + fmt.Sprintf("\t%s = boolVal\n", fieldName))
 		builder.WriteString(indent + "}\n")
 	default:

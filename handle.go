@@ -18,7 +18,7 @@ import (
 
 // 预分配错误响应对象池
 var errorResponsePool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &gin.H{}
 	},
 }

@@ -25,8 +25,11 @@ func init() {
 // 也可以不使用该方法，自定义创建全局追踪器
 func InitGlobalTracerProvider(serviceName string, customExporters ...sdktrace.SpanExporter) {
 	// 尝试关闭现有的 TracerProvider 以释放资源
-	if provider, ok := otel.GetTracerProvider().(*sdktrace.TracerProvider); ok {
-		_ = provider.Shutdown(context.Background())
+	// 使用安全的类型断言
+	if currentProvider := otel.GetTracerProvider(); currentProvider != nil {
+		if provider, ok := currentProvider.(*sdktrace.TracerProvider); ok {
+			_ = provider.Shutdown(context.Background())
+		}
 	}
 
 	// 设置全局传播器为W3C Trace Context标准

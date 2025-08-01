@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"time"
 )
 
 // fieldCache 用于缓存结构体字段的标签信息
@@ -23,7 +22,7 @@ type bodyFieldInfo struct {
 }
 
 // decodeJSON 从请求中解析JSON数据并验证必填字段
-func decodeJSON(r io.Reader, v interface{}) error {
+func decodeJSON(r io.Reader, v any) error {
 	// 使用json.NewDecoder避免额外的内存分配
 	decoder := json.NewDecoder(r)
 	if err := decoder.Decode(v); err != nil {
@@ -80,42 +79,9 @@ func handleEmptyValue(structPath string, field reflect.StructField, tagKey strin
 	return true, defaultValue
 }
 
-// isEmptyValue 判断字段值是否为空
+// isEmptyValue 判断字段值是否为空（使用更安全的实现）
 func isEmptyValue(v reflect.Value) bool {
-	if !v.IsValid() {
-		return true
-	}
-
-	switch v.Kind() {
-	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
-		return v.Len() == 0
-	case reflect.Bool:
-		return !v.Bool()
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return v.Int() == 0
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return v.Uint() == 0
-	case reflect.Float32, reflect.Float64:
-		return v.Float() == 0
-	case reflect.Interface, reflect.Ptr:
-		if v.IsNil() {
-			return true
-		}
-		return isEmptyValue(v.Elem())
-	case reflect.Struct:
-		// 处理time.Time类型
-		if v.Type().String() == "time.Time" {
-			return v.Interface().(time.Time).IsZero()
-		}
-		// 检查结构体的所有字段是否为空
-		for i := 0; i < v.NumField(); i++ {
-			if !isEmptyValue(v.Field(i)) {
-				return false
-			}
-		}
-		return true
-	}
-	return false
+	return IsZeroValue(v)
 }
 
 // validateFieldsCache 用于缓存结构体字段的验证信息
@@ -169,10 +135,10 @@ func getValidateFields(t reflect.Type) []validateFieldInfo {
 
 // validateRequiredFields 递归验证结构体的必填字段
 func ValidateJsonRequiredFields(v reflect.Value) error {
-	// 处理指针类型
+	// 处理指针类型，添加安全检查
 	for {
 		if v.Kind() == reflect.Ptr {
-			if v.IsNil() {
+			if v.IsNil() || !v.IsValid() {
 				return nil
 			}
 			v = v.Elem()
@@ -206,8 +172,12 @@ func ValidateJsonRequiredFields(v reflect.Value) error {
 					// 如果字段可以为空，则跳过后续验证
 					continue
 				}
-				// 如果指针不为nil，获取其指向的值
-				fieldValue = fieldValue.Elem()
+				// 如果指针不为nil，安全地获取其指向的值
+				if fieldValue.IsValid() && fieldValue.CanInterface() {
+					fieldValue = fieldValue.Elem()
+				} else {
+					continue
+				}
 			}
 			// 无论字段是否可以为空，只要不为nil就需要递归验证其内部字段
 			if err := ValidateJsonRequiredFields(fieldValue); err != nil {
@@ -351,7 +321,7 @@ func getFormFields(t reflect.Type) []formFieldInfo {
 }
 
 // decodeMultipartForm 从请求中解析multipart表单数据
-func decodeMultipartForm(form *multipart.Form, v interface{}) error {
+func decodeMultipartForm(form *multipart.Form, v any) error {
 	// 获取结构体类型
 	structValue := reflect.ValueOf(v)
 	if structValue.Kind() == reflect.Ptr {
@@ -402,4 +372,63 @@ func decodeMultipartForm(form *multipart.Form, v interface{}) error {
 		}
 	}
 	return nil
+}
+
+// IsZeroValue 检查值是否为零值（改进版本，更安全）
+func IsZeroValue(v reflect.Value) bool {
+	if !v.IsValid() {
+		return true
+	}
+
+	switch v.Kind() {
+	case reflect.Bool:
+		return !v.Bool()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return v.Int() == 0
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return v.Uint() == 0
+	case reflect.Float32, reflect.Float64:
+		return v.Float() == 0
+	case reflect.Complex64, reflect.Complex128:
+		return v.Complex() == 0
+	case reflect.Array, reflect.Chan, reflect.Map, reflect.Slice, reflect.String:
+		return v.Len() == 0
+	case reflect.Interface, reflect.Ptr:
+		if v.IsNil() {
+			return true
+		}
+		elem, err := SafeReflectElem(v)
+		if err != nil {
+			return true
+		}
+		return IsZeroValue(elem)
+	case reflect.Struct:
+		// 对于结构体，检查所有字段是否都为零值
+		for i := 0; i < v.NumField(); i++ {
+			if !IsZeroValue(v.Field(i)) {
+				return false
+			}
+		}
+		return true
+	default:
+		// 对于其他类型，使用reflect.Zero比较
+		return v.Interface() == reflect.Zero(v.Type()).Interface()
+	}
+}
+
+// SafeReflectElem 安全地获取反射值的元素，包含nil检查
+func SafeReflectElem(v reflect.Value) (reflect.Value, error) {
+	if !v.IsValid() {
+		return reflect.Value{}, fmt.Errorf("invalid reflect value")
+	}
+
+	if v.Kind() != reflect.Ptr && v.Kind() != reflect.Interface {
+		return v, nil
+	}
+
+	if v.IsNil() {
+		return reflect.Value{}, fmt.Errorf("cannot get element of nil pointer")
+	}
+
+	return v.Elem(), nil
 }
