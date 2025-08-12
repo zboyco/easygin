@@ -391,10 +391,11 @@ func renderMiddleware(h RouterHandler, handlerName string) gin.HandlerFunc {
 }
 
 func renderGinHandler(h GinHandler, handlerName string) gin.HandlerFunc {
+	ginHandler := h.GinHandle()
 	return func(ctx *gin.Context) {
 		// 将handlerName存入context
 		ctx.Request = ctx.Request.WithContext(ContextWithHandlerName(ctx.Request.Context(), handlerName))
-		h.GinHandle()(ctx)
+		ginHandler(ctx)
 	}
 }
 
