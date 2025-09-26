@@ -8,7 +8,6 @@
 ## 核心数据结构
 
 ### 缓存结构
-- `errorResponsePool`: 错误响应对象池，类型为`sync.Pool`
 - `structFields`: 缓存结构体字段信息，类型为`sync.Map`
 
 ### 字段信息结构
@@ -41,7 +40,7 @@
 - 签名: `func handleError(c *gin.Context, err error) `
 - 功能: 统一处理错误响应
 - 处理内容:
-  1. 从对象池获取响应对象
+  1. 将错误添加到 gin.Context 的 Errors 中
   2. 检查是否为自定义HTTP错误
   3. 生成标准格式的错误响应
   4. 返回适当的HTTP状态码
@@ -128,10 +127,6 @@
   2. 将gin.Context添加到context中
   3. 调用Handler的Output方法
 
-### 10. GinContextFromContext
-- 签名: `func GinContextFromContext(ctx context.Context) *gin.Context`
-- 功能: 从context中提取gin.Context
-- 用途: 在非中间件函数中访问gin.Context
 
 ## 参数绑定流程
 
@@ -175,6 +170,7 @@
 ### 3. 特殊处理
 - 文件响应: 设置Content-Disposition头，处理文件下载
 - 流式响应: 使用DataFromReader处理大文件或流式数据
+- 资源管理: 自动关闭实现了io.Closer接口的文件资源
 - 错误处理: 统一格式的错误响应
 
 ## 缓存机制
@@ -185,10 +181,6 @@
 - 缓存值: 字段信息数组
 - 目的: 减少重复解析结构体的开销
 
-### 错误响应对象池
-- 使用`sync.Pool`实现对象复用
-- 目的: 减少内存分配和GC压力
-- 使用方式: 从池中获取对象，使用后归还
 
 ## 标签处理
 
@@ -219,10 +211,6 @@
 - 减少重复解析结构体的开销
 - 缓存键包含包路径和类型名，避免冲突
 
-### 对象池
-- 使用`sync.Pool`复用错误响应对象
-- 减少内存分配和GC压力
-- 适用于高频创建的临时对象
 
 ### 反射优化
 - 缓存反射结果

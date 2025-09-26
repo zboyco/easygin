@@ -337,6 +337,39 @@ func main() {
 - `desc`: 参数描述，用于生成OpenAPI文档
 - `mime`: 用于 body 参数，指定 MIME 类型，支持 "multipart" 表示表单上传
 
+### Multipart 表单内存限制
+
+easygin 支持设置 Multipart 表单的内存限制，用于控制文件上传时的内存使用量：
+
+```go
+// 设置 Multipart 表单的内存限制（字节）
+easygin.SetMultipartMemoryLimit(50 * 1024 * 1024) // 设置为 50MB
+
+// 获取当前的 Multipart 表单内存限制
+limit := easygin.GetMultipartMemoryLimit()
+```
+
+默认情况下，Multipart 表单的内存限制为 100MB。可以通过 `SetMultipartMemoryLimit` 函数进行调整，参数为字节大小。该函数是并发安全的，可以在程序运行时动态调整。
+
+### JSON 参数标签处理
+
+easygin 支持控制是否处理 JSON 请求体中的 `omitempty` 和 `default` 标签：
+
+```go
+// 设置是否处理 JSON 请求体中的 omitempty 和 default 标签
+easygin.SetHandleBodyJsonOmitEmptyAndDefault(true)
+
+// 获取当前的设置状态
+enabled := easygin.HandleBodyJsonOmitEmptyAndDefault()
+```
+
+默认情况下，此功能是关闭的（`false`），因为启用后会使用反射处理 JSON 标签，会对性能产生一定影响。启用后，系统会：
+
+- 处理 `omitempty` 标签：标记字段为可选，不校验是否为空值。如果没有 `omitempty` 标签，则该字段为必填，如果为空会报错
+- 处理 `default` 标签：当字段未提供时，使用标签中指定的默认值
+
+该功能是并发安全的，可以在程序运行时动态调整。
+
 ### 错误处理
 
 easygin 提供了统一的错误处理机制：

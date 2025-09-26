@@ -16,12 +16,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// 预分配错误响应对象池
-var errorResponsePool = sync.Pool{
-	New: func() any {
-		return &gin.H{}
-	},
-}
 
 // fieldInfo 存储字段的元信息
 type fieldInfo struct {
@@ -40,26 +34,22 @@ func handleError(c *gin.Context, err error) {
 	// 将错误添加到 gin.Context 的 Errors 中
 	_ = c.Error(err)
 
-	// 从对象池获取响应对象
-	resp := errorResponsePool.Get().(*gin.H)
-	defer errorResponsePool.Put(resp)
-
 	if errorHttp, ok := err.(ErrorHttp); ok {
-		*resp = gin.H{
+		resp := gin.H{
 			"code": errorHttp.StatusCode(),
 			"msg":  errorHttp.Error(),
 			"desc": errorHttp.Desc(),
 		}
-		c.AbortWithStatusJSON(errorHttp.StatusCode(), *resp)
+		c.AbortWithStatusJSON(errorHttp.StatusCode(), resp)
 		return
 	}
 
-	*resp = gin.H{
+	resp := gin.H{
 		"code": 500,
 		"msg":  err.Error(),
 		"desc": "Internal Server Error",
 	}
-	c.AbortWithStatusJSON(500, *resp)
+	c.AbortWithStatusJSON(500, resp)
 }
 
 // parseTime 统一处理时间格式解析
@@ -229,8 +219,8 @@ func bindParams(c *gin.Context, h RouterHandler) (RouterHandler, error) {
 		if info.tagType == "body" {
 			mime := info.field.Tag.Get("mime")
 			if mime == "multipart" {
-				// 将 multipart 表单内存限制为 1GB，实际上相当于不做限制
-				if err := c.Request.ParseMultipartForm(1 << 30); err != nil {
+				// 使用全局设置的 multipart 表单内存限制
+				if err := c.Request.ParseMultipartForm(GetMultipartMemoryLimit()); err != nil {
 					return nil, fmt.Errorf("parse multipart form failed: %v", err)
 				}
 
