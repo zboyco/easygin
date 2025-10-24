@@ -713,14 +713,19 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 
 var OpenAPIRouter = &OpenAPI{}
 
+func NewOpenAPIRouter(path string) *OpenAPI {
+	return &OpenAPI{path: path}
+}
+
 type OpenAPI struct {
 	MethodGet
 	NoOpenAPI
 	NoGenParameter
+	path string
 }
 
-func (OpenAPI) Path() string {
-	return ""
+func (o *OpenAPI) Path() string {
+	return o.path
 }
 
 func (OpenAPI) Output(ctx context.Context) (any, error) {
