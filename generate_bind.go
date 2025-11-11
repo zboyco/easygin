@@ -213,10 +213,12 @@ func generatePathBinding(builder *strings.Builder, fieldName, paramName string, 
 func generateQueryBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField) {
 	builder.WriteString(fmt.Sprintf("\t// 绑定查询参数 %s\n", paramName))
 	builder.WriteString("\t{\n") // 添加代码块开始
-	builder.WriteString(fmt.Sprintf("\t\tqueryVal := c.Query(\"%s\")\n", paramName))
-
-	// 根据字段类型添加零值检查
-	addZeroValueCheck(builder, "queryVal", field.Type)
+	fieldType := field.Type
+	isSlicePtr := false
+	if fieldType.Kind() == reflect.Ptr && fieldType.Elem().Kind() == reflect.Slice {
+		isSlicePtr = true
+		fieldType = fieldType.Elem()
+	}
 
 	// 检查是否必填
 	tagNames := strings.Split(field.Tag.Get("name"), ",")
@@ -227,6 +229,21 @@ func generateQueryBinding(builder *strings.Builder, fieldName, paramName string,
 			break
 		}
 	}
+
+	if fieldType.Kind() == reflect.Slice {
+		if generateQuerySliceBinding(builder, fieldName, paramName, fieldType, isSlicePtr, isOmitempty) {
+			builder.WriteString("\t}\n")
+			return
+		}
+		builder.WriteString(fmt.Sprintf("\t\treturn errors.New(\"unsupported slice parameter type '%s' in query\")\n", fieldType.String()))
+		builder.WriteString("\t}\n")
+		return
+	}
+
+	builder.WriteString(fmt.Sprintf("\t\tqueryVal := c.Query(\"%s\")\n", paramName))
+
+	// 根据字段类型添加零值检查
+	addZeroValueCheck(builder, "queryVal", field.Type)
 
 	if !isOmitempty {
 		builder.WriteString("\t\tif queryVal == \"\" {\n")
@@ -254,6 +271,152 @@ func generateQueryBinding(builder *strings.Builder, fieldName, paramName string,
 	}
 	builder.WriteString("\t\t}\n")
 	builder.WriteString("\t}\n")
+}
+
+// generateQuerySliceBinding 生成查询参数切片绑定代码
+func generateQuerySliceBinding(builder *strings.Builder, fieldName, paramName string, sliceType reflect.Type, isSlicePtr bool, isOmitempty bool) bool {
+	elemType := sliceType.Elem()
+	isElemPtr := false
+	baseType := elemType
+	if elemType.Kind() == reflect.Ptr {
+		isElemPtr = true
+		baseType = elemType.Elem()
+	}
+
+	if baseType.PkgPath() != "" {
+		return false
+	}
+
+	baseKind := baseType.Kind()
+	if !(baseKind == reflect.String || baseKind == reflect.Bool || isSignedIntKind(baseKind) || isUnsignedIntKind(baseKind) || isFloatKind(baseKind)) {
+		return false
+	}
+
+	builder.WriteString(fmt.Sprintf("\t\tqueryVals := c.QueryArray(\"%s\")\n", paramName))
+	if !isOmitempty {
+		builder.WriteString("\t\tif len(queryVals) == 0 {\n")
+		builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required parameter '%s' in query\")\n", paramName))
+		builder.WriteString("\t\t}\n")
+	}
+	builder.WriteString("\t\tif len(queryVals) > 0 {\n")
+
+	switch {
+	case baseKind == reflect.String:
+		if isElemPtr {
+			builder.WriteString(fmt.Sprintf("\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceType.String()))
+			builder.WriteString("\t\t\tfor _, val := range queryVals {\n")
+			builder.WriteString("\t\t\t\tvalCopy := val\n")
+			builder.WriteString("\t\t\t\tconvertedVals = append(convertedVals, &valCopy)\n")
+			builder.WriteString("\t\t\t}\n")
+			assignSliceValue(builder, fieldName, "convertedVals", isSlicePtr)
+		} else {
+			if isSlicePtr {
+				builder.WriteString("\t\t\tvaluesCopy := queryVals\n")
+				builder.WriteString(fmt.Sprintf("\t\t\t%s = &valuesCopy\n", fieldName))
+			} else {
+				builder.WriteString(fmt.Sprintf("\t\t\t%s = queryVals\n", fieldName))
+			}
+		}
+	case isSignedIntKind(baseKind):
+		builder.WriteString(fmt.Sprintf("\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceType.String()))
+		builder.WriteString("\t\t\tfor _, val := range queryVals {\n")
+		builder.WriteString("\t\t\t\tparsedVal, err := strconv.ParseInt(val, 10, 64)\n")
+		builder.WriteString("\t\t\t\tif err != nil {\n")
+		builder.WriteString(fmt.Sprintf("\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
+		builder.WriteString("\t\t\t\t}\n")
+		if isElemPtr {
+			builder.WriteString(fmt.Sprintf("\t\t\t\tvalCopy := %s(parsedVal)\n", baseType.String()))
+			builder.WriteString("\t\t\t\tconvertedVals = append(convertedVals, &valCopy)\n")
+		} else {
+			builder.WriteString(fmt.Sprintf("\t\t\t\tconvertedVals = append(convertedVals, %s(parsedVal))\n", baseType.String()))
+		}
+		builder.WriteString("\t\t\t}\n")
+		assignSliceValue(builder, fieldName, "convertedVals", isSlicePtr)
+	case isUnsignedIntKind(baseKind):
+		builder.WriteString(fmt.Sprintf("\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceType.String()))
+		builder.WriteString("\t\t\tfor _, val := range queryVals {\n")
+		builder.WriteString("\t\t\t\tparsedVal, err := strconv.ParseUint(val, 10, 64)\n")
+		builder.WriteString("\t\t\t\tif err != nil {\n")
+		builder.WriteString(fmt.Sprintf("\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
+		builder.WriteString("\t\t\t\t}\n")
+		if isElemPtr {
+			builder.WriteString(fmt.Sprintf("\t\t\t\tvalCopy := %s(parsedVal)\n", baseType.String()))
+			builder.WriteString("\t\t\t\tconvertedVals = append(convertedVals, &valCopy)\n")
+		} else {
+			builder.WriteString(fmt.Sprintf("\t\t\t\tconvertedVals = append(convertedVals, %s(parsedVal))\n", baseType.String()))
+		}
+		builder.WriteString("\t\t\t}\n")
+		assignSliceValue(builder, fieldName, "convertedVals", isSlicePtr)
+	case isFloatKind(baseKind):
+		builder.WriteString(fmt.Sprintf("\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceType.String()))
+		builder.WriteString("\t\t\tfor _, val := range queryVals {\n")
+		builder.WriteString("\t\t\t\tfloatVal, err := strconv.ParseFloat(val, 64)\n")
+		builder.WriteString("\t\t\t\tif err != nil {\n")
+		builder.WriteString(fmt.Sprintf("\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
+		builder.WriteString("\t\t\t\t}\n")
+		if isElemPtr {
+			builder.WriteString(fmt.Sprintf("\t\t\t\tvalCopy := %s(floatVal)\n", baseType.String()))
+			builder.WriteString("\t\t\t\tconvertedVals = append(convertedVals, &valCopy)\n")
+		} else {
+			builder.WriteString(fmt.Sprintf("\t\t\t\tconvertedVals = append(convertedVals, %s(floatVal))\n", baseType.String()))
+		}
+		builder.WriteString("\t\t\t}\n")
+		assignSliceValue(builder, fieldName, "convertedVals", isSlicePtr)
+	case baseKind == reflect.Bool:
+		builder.WriteString(fmt.Sprintf("\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceType.String()))
+		builder.WriteString("\t\t\tfor _, val := range queryVals {\n")
+		builder.WriteString("\t\t\t\tboolVal, err := strconv.ParseBool(val)\n")
+		builder.WriteString("\t\t\t\tif err != nil {\n")
+		builder.WriteString(fmt.Sprintf("\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
+		builder.WriteString("\t\t\t\t}\n")
+		if isElemPtr {
+			builder.WriteString("\t\t\t\tvalCopy := boolVal\n")
+			builder.WriteString("\t\t\t\tconvertedVals = append(convertedVals, &valCopy)\n")
+		} else {
+			builder.WriteString("\t\t\t\tconvertedVals = append(convertedVals, boolVal)\n")
+		}
+		builder.WriteString("\t\t\t}\n")
+		assignSliceValue(builder, fieldName, "convertedVals", isSlicePtr)
+	}
+
+	builder.WriteString("\t\t}\n")
+	return true
+}
+
+func assignSliceValue(builder *strings.Builder, fieldName, valueName string, isSlicePtr bool) {
+	if isSlicePtr {
+		builder.WriteString(fmt.Sprintf("\t\t\tvaluesCopy := %s\n", valueName))
+		builder.WriteString(fmt.Sprintf("\t\t\t%s = &valuesCopy\n", fieldName))
+	} else {
+		builder.WriteString(fmt.Sprintf("\t\t\t%s = %s\n", fieldName, valueName))
+	}
+}
+
+func isSignedIntKind(kind reflect.Kind) bool {
+	switch kind {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return true
+	default:
+		return false
+	}
+}
+
+func isUnsignedIntKind(kind reflect.Kind) bool {
+	switch kind {
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return true
+	default:
+		return false
+	}
+}
+
+func isFloatKind(kind reflect.Kind) bool {
+	switch kind {
+	case reflect.Float32, reflect.Float64:
+		return true
+	default:
+		return false
+	}
 }
 
 // generateHeaderBinding 生成头部参数绑定代码

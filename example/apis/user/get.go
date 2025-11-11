@@ -13,8 +13,11 @@ func init() {
 
 type GetUser struct {
 	easygin.MethodGet `summary:"Get user info" `
-	Token             string `in:"header" name:"Token" desc:"User token"`
-	ID                int    `in:"path" name:"id" desc:"User ID"`
+	Token             string   `in:"header" name:"Token" desc:"User token"`
+	ID                int      `in:"path" name:"id" desc:"User ID"`
+	Names             []string `in:"query" name:"names" desc:"User Names"`
+	IDs               []uint64 `in:"query" name:"ids,omitempty" desc:"User IDs"`
+	Bools             []bool   `in:"query" name:"bools" desc:"User bool"`
 }
 
 func (GetUser) Path() string {

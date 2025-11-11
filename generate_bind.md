@@ -38,7 +38,8 @@
 
 ### 4. 参数绑定生成函数
 - `generatePathBinding`: 生成路径参数绑定代码
-- `generateQueryBinding`: 生成查询参数绑定代码
+- `generateQueryBinding`: 生成查询参数绑定代码；支持识别 `[]T`、`*[]T` 以及 `[]*T` 字段，先判断是否允许为空 (`omitempty`)，再调用切片专用逻辑或回退到单值解析，并对默认值、必填校验等保持一致处理
+- `generateQuerySliceBinding`: 查询参数切片绑定逻辑，使用 `c.QueryArray()` 捕获同名参数数组，针对 string、bool、各类有符号/无符号整数和浮点类型（及其指针）依次转换并回写字段，不支持的类型会直接返回错误
 - `generateHeaderBinding`: 生成头部参数绑定代码
 - `generateBodyBinding`: 生成请求体绑定代码
   - 支持指针类型字段的实例化
@@ -64,6 +65,8 @@
 - `collectExternalPackages`: 收集结构体中所有字段的外部包
 - `isBuiltinType`: 判断是否是内置类型
 - `isDefaultValueValid`: 检查默认值是否与字段类型匹配
+- `assignSliceValue`: 将切片解析结果写回字段，兼容切片指针与普通切片
+- `isSignedIntKind`/`isUnsignedIntKind`/`isFloatKind`: 判断切片元素的基础种类，供查询参数切片绑定时过滤合法类型
 
 ## 标签处理
 - `in`: 指定参数来源 (path, query, header, body)
@@ -82,6 +85,7 @@
 8. 支持JSON请求体绑定和验证
 9. 支持匿名结构体的格式化生成，提高代码可读性
 10. 支持字符串数组和字符串数组指针类型的表单参数处理
+11. 支持查询参数切片的自动绑定，包含切片指针和指针元素
 
 ## 代码生成流程
 1. 收集所有API并按包分组
@@ -117,3 +121,4 @@
 ## 特殊类型处理
 - 字符串数组 (`[]string`): 使用 `c.PostFormArray()` 方法获取表单中的数组值
 - 字符串数组指针 (`*[]string`): 使用 `c.PostFormArray()` 获取值后，将其地址赋给字段
+- 查询参数切片: 使用 `c.QueryArray()` 支持一次性解析 `[]string`、`[]bool`、各整数/浮点切片以及上述类型的指针版本（如 `[]*int`、`*[]float64`），并对 `omitempty`、必填校验与类型转换都进行统一处理

@@ -8,10 +8,56 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/zboyco/easygin"
 )
+
+func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
+	// 绑定查询参数 name
+	{
+		queryVal := c.Query("name")
+		if queryVal != "" {
+			r.Name = string(queryVal)
+		}
+	}
+	// 绑定查询参数 ageMin
+	{
+		queryVal := c.Query("ageMin")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "18"
+		}
+		if queryVal != "" {
+			intVal, err := strconv.ParseInt(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'ageMin': %v", err.Error())
+			}
+			r.AgeMin = int(intVal)
+		}
+	}
+	// 绑定查询参数 startTime
+	{
+		queryVal := c.Query("startTime")
+		if strings.HasPrefix(queryVal, "0000-00-00T00:00:00") {
+			queryVal = ""
+		}
+		if queryVal != "" {
+			t, err := time.Parse(time.RFC3339, queryVal)
+			if err != nil {
+				return fmt.Errorf("invalid time format for parameter 'startTime': %v", err.Error())
+			}
+			if !t.IsZero() {
+				r.StartTime = t
+			}
+		}
+	}
+	return nil
+}
 
 func (r *CreateUser) EasyGinBindParameters(c *gin.Context) error {
 	{
@@ -59,32 +105,47 @@ func (r *GetUser) EasyGinBindParameters(c *gin.Context) error {
 			r.ID = int(intVal)
 		}
 	}
-	return nil
-}
-
-func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
-	// 绑定查询参数 name
+	// 绑定查询参数 names
 	{
-		queryVal := c.Query("name")
-		if queryVal != "" {
-			r.Name = string(queryVal)
+		queryVals := c.QueryArray("names")
+		if len(queryVals) == 0 {
+			return errors.New("missing required parameter 'names' in query")
+		}
+		if len(queryVals) > 0 {
+			r.Names = queryVals
 		}
 	}
-	// 绑定查询参数 ageMin
+	// 绑定查询参数 ids
 	{
-		queryVal := c.Query("ageMin")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
-			queryVal = "18"
-		}
-		if queryVal != "" {
-			intVal, err := strconv.ParseInt(queryVal, 10, 64)
-			if err != nil {
-				return fmt.Errorf("invalid parameter 'ageMin': %v", err.Error())
+		queryVals := c.QueryArray("ids")
+		if len(queryVals) > 0 {
+			convertedVals := make([]uint64, 0, len(queryVals))
+			for _, val := range queryVals {
+				parsedVal, err := strconv.ParseUint(val, 10, 64)
+				if err != nil {
+					return fmt.Errorf("invalid parameter 'ids': %v", err.Error())
+				}
+				convertedVals = append(convertedVals, uint64(parsedVal))
 			}
-			r.AgeMin = int(intVal)
+			r.IDs = convertedVals
+		}
+	}
+	// 绑定查询参数 bools
+	{
+		queryVals := c.QueryArray("bools")
+		if len(queryVals) == 0 {
+			return errors.New("missing required parameter 'bools' in query")
+		}
+		if len(queryVals) > 0 {
+			convertedVals := make([]bool, 0, len(queryVals))
+			for _, val := range queryVals {
+				boolVal, err := strconv.ParseBool(val)
+				if err != nil {
+					return fmt.Errorf("invalid parameter 'bools': %v", err.Error())
+				}
+				convertedVals = append(convertedVals, boolVal)
+			}
+			r.Bools = convertedVals
 		}
 	}
 	return nil
