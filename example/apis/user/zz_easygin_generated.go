@@ -15,50 +15,6 @@ import (
 	"github.com/zboyco/easygin"
 )
 
-func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
-	// 绑定查询参数 name
-	{
-		queryVal := c.Query("name")
-		if queryVal != "" {
-			r.Name = string(queryVal)
-		}
-	}
-	// 绑定查询参数 ageMin
-	{
-		queryVal := c.Query("ageMin")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
-			queryVal = "18"
-		}
-		if queryVal != "" {
-			intVal, err := strconv.ParseInt(queryVal, 10, 64)
-			if err != nil {
-				return fmt.Errorf("invalid parameter 'ageMin': %v", err.Error())
-			}
-			r.AgeMin = int(intVal)
-		}
-	}
-	// 绑定查询参数 startTime
-	{
-		queryVal := c.Query("startTime")
-		if strings.HasPrefix(queryVal, "0000-00-00T00:00:00") {
-			queryVal = ""
-		}
-		if queryVal != "" {
-			t, err := time.Parse(time.RFC3339, queryVal)
-			if err != nil {
-				return fmt.Errorf("invalid time format for parameter 'startTime': %v", err.Error())
-			}
-			if !t.IsZero() {
-				r.StartTime = t
-			}
-		}
-	}
-	return nil
-}
-
 func (r *CreateUser) EasyGinBindParameters(c *gin.Context) error {
 	{
 		// 绑定JSON请求体
@@ -146,6 +102,50 @@ func (r *GetUser) EasyGinBindParameters(c *gin.Context) error {
 				convertedVals = append(convertedVals, boolVal)
 			}
 			r.Bools = convertedVals
+		}
+	}
+	return nil
+}
+
+func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
+	// 绑定查询参数 name
+	{
+		queryVal := c.Query("name")
+		if queryVal != "" {
+			r.Name = string(queryVal)
+		}
+	}
+	// 绑定查询参数 ageMin
+	{
+		queryVal := c.Query("ageMin")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "18"
+		}
+		if queryVal != "" {
+			intVal, err := strconv.ParseInt(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'ageMin': %v", err.Error())
+			}
+			r.AgeMin = int(intVal)
+		}
+	}
+	// 绑定查询参数 startTime
+	{
+		queryVal := c.Query("startTime")
+		if strings.HasPrefix(queryVal, "0000-00-00T00:00:00") {
+			queryVal = ""
+		}
+		if queryVal != "" {
+			t, err := time.Parse(time.RFC3339, queryVal)
+			if err != nil {
+				return fmt.Errorf("invalid time format for parameter 'startTime': %v", err.Error())
+			}
+			if !t.IsZero() {
+				r.StartTime = t
+			}
 		}
 	}
 	return nil

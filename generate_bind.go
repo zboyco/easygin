@@ -1,12 +1,17 @@
 package easygin
 
 import (
+	"bufio"
 	"fmt"
+	"go/build"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -58,8 +63,15 @@ func GenerateParametersBindFunction(groups ...*RouterGroup) error {
 		return fmt.Errorf("no APIs found in any router group")
 	}
 
-	// 为每个包生成zz_easygin_generated.go文件
-	for pkgPath, apis := range apisByPkg {
+	// 为每个包生成zz_easygin_generated.go文件，确保遍历顺序稳定
+	pkgPaths := make([]string, 0, len(apisByPkg))
+	for pkgPath := range apisByPkg {
+		pkgPaths = append(pkgPaths, pkgPath)
+	}
+	sort.Strings(pkgPaths)
+
+	for _, pkgPath := range pkgPaths {
+		apis := apisByPkg[pkgPath]
 		fmt.Printf("Generating file for package: %s with %d APIs\n", pkgPath, len(apis))
 		if err := generateFileForPackage(pkgPath, apis); err != nil {
 			return fmt.Errorf("failed to generate file for package %s: %v", pkgPath, err)
@@ -833,7 +845,13 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 
 	// 为每个唯一的API生成Parse方法并检查使用的包
 	var parseMethods strings.Builder
-	for _, api := range uniqueAPIs {
+	typeKeys := make([]string, 0, len(uniqueAPIs))
+	for key := range uniqueAPIs {
+		typeKeys = append(typeKeys, key)
+	}
+	sort.Strings(typeKeys)
+	for _, key := range typeKeys {
+		api := uniqueAPIs[key]
 		apiType := reflect.TypeOf(api)
 		if apiType.Kind() == reflect.Ptr {
 			apiType = apiType.Elem()
@@ -893,7 +911,12 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 	// 添加外部类型的包
 	if len(externalTypeImports) > 0 {
 		builder.WriteString("\n")
+		externalPkgs := make([]string, 0, len(externalTypeImports))
 		for pkg := range externalTypeImports {
+			externalPkgs = append(externalPkgs, pkg)
+		}
+		sort.Strings(externalPkgs)
+		for _, pkg := range externalPkgs {
 			builder.WriteString(fmt.Sprintf("\t\"%s\"\n", pkg))
 		}
 	}
@@ -908,20 +931,13 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 
 // generateFileForPackage 为指定包生成文件
 func generateFileForPackage(pkgPath string, apis []RouterHandler) error {
-	// 获取包所在的目录
-	gopath := os.Getenv("GOPATH")
-	if gopath == "" {
-		// 如果GOPATH为空，尝试使用默认路径
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("failed to get home directory: %v", err)
-		}
-		gopath = filepath.Join(homeDir, "go")
+	if len(apis) == 0 {
+		return fmt.Errorf("package %s has no apis to generate", pkgPath)
 	}
 
-	pkgDir := filepath.Join(gopath, "src", pkgPath)
-	if _, err := os.Stat(pkgDir); os.IsNotExist(err) {
-		return fmt.Errorf("package directory not found: %s", pkgDir)
+	pkgDir, err := packageDirForHandler(pkgPath, apis[0])
+	if err != nil {
+		return fmt.Errorf("failed to locate package directory for %s: %w", pkgPath, err)
 	}
 
 	// 生成文件内容
@@ -945,6 +961,131 @@ func generateFileForPackage(pkgPath string, apis []RouterHandler) error {
 
 	fmt.Printf("Successfully generated file: %s\n", filepath.Join(pkgPath, "zz_easygin_generated.go"))
 	return nil
+}
+
+func packageDirForHandler(pkgPath string, handler RouterHandler) (string, error) {
+	if dir, err := packageDirFromRuntime(handler); err == nil {
+		return dir, nil
+	}
+	if dir, err := packageDirFromModule(pkgPath); err == nil {
+		return dir, nil
+	}
+	return packageDirFromBuild(pkgPath)
+}
+
+func packageDirFromRuntime(handler RouterHandler) (string, error) {
+	t := reflect.TypeOf(handler)
+	method, ok := t.MethodByName("Output")
+	if !ok {
+		return "", fmt.Errorf("handler %T does not implement Output method", handler)
+	}
+
+	pc := method.Func.Pointer()
+	if pc == 0 {
+		return "", fmt.Errorf("cannot determine function pointer for handler %T", handler)
+	}
+
+	fn := runtime.FuncForPC(pc)
+	if fn == nil {
+		return "", fmt.Errorf("cannot resolve runtime function for handler %T", handler)
+	}
+
+	file, _ := fn.FileLine(pc)
+	if file == "" || strings.HasPrefix(file, "<") || !filepath.IsAbs(file) {
+		return "", fmt.Errorf("cannot determine file path for handler %T", handler)
+	}
+
+	return filepath.Dir(file), nil
+}
+
+func packageDirFromBuild(pkgPath string) (string, error) {
+	if pkgPath == "" {
+		return "", fmt.Errorf("empty pkg path")
+	}
+
+	pkg, err := build.Import(pkgPath, ".", build.IgnoreVendor)
+	if err != nil {
+		return "", err
+	}
+
+	return pkg.Dir, nil
+}
+
+func packageDirFromModule(pkgPath string) (string, error) {
+	modulePath, moduleDir, err := loadModuleInfo()
+	if err != nil {
+		return "", err
+	}
+
+	if pkgPath != modulePath && !strings.HasPrefix(pkgPath, modulePath+"/") {
+		return "", fmt.Errorf("package %s is outside module %s", pkgPath, modulePath)
+	}
+
+	rel := strings.TrimPrefix(pkgPath, modulePath)
+	rel = strings.TrimPrefix(rel, "/")
+	return filepath.Join(moduleDir, filepath.FromSlash(rel)), nil
+}
+
+var (
+	moduleInfoOnce sync.Once
+	moduleInfoPath string
+	moduleInfoDir  string
+	moduleInfoErr  error
+)
+
+func loadModuleInfo() (string, string, error) {
+	moduleInfoOnce.Do(func() {
+		var dir string
+		dir, moduleInfoErr = findModuleRoot()
+		if moduleInfoErr != nil {
+			return
+		}
+		moduleInfoDir = dir
+		moduleInfoPath, moduleInfoErr = parseModulePath(filepath.Join(dir, "go.mod"))
+	})
+	return moduleInfoPath, moduleInfoDir, moduleInfoErr
+}
+
+func findModuleRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		next := filepath.Dir(dir)
+		if next == dir {
+			break
+		}
+		dir = next
+	}
+	return "", fmt.Errorf("go.mod not found from current working directory")
+}
+
+func parseModulePath(goModPath string) (string, error) {
+	file, err := os.Open(goModPath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "//") {
+			continue
+		}
+		if strings.HasPrefix(line, "module ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "module ")), nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	return "", fmt.Errorf("module path not found in %s", goModPath)
 }
 
 // generateTypeConversion 生成类型转换代码

@@ -13,8 +13,6 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
-var serviceName = "easygin"
-
 // Server 封装gin.Engine，提供端口和调试模式配置
 // 负责管理HTTP服务器的生命周期和路由注册
 type Server struct {
@@ -105,7 +103,7 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 	s.engine.Use(otelgin.Middleware(s.serviceName))
 
 	// 添加日志中间件
-	s.engine.Use(middleLogger())
+	s.engine.Use(middleLogger(s.serviceName))
 
 	// 添加404处理
 	s.engine.NoRoute(func(c *gin.Context) {
@@ -283,6 +281,10 @@ func handleGroup(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *Rou
 		}
 
 		// 处理实现了RouterHandler接口的API
+		if handler.Method() == "ANY" {
+			g.Any(handler.Path(), renderAPI(handler, handlerName))
+			continue
+		}
 		g.Handle(handler.Method(), handler.Path(), renderAPI(handler, handlerName))
 	}
 
@@ -294,7 +296,11 @@ func handleGroup(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *Rou
 
 // getShortMethod 获取HTTP方法的简短表示
 func getShortMethod(method string) string {
-	return strings.ToUpper(method)[:3]
+	method = strings.ToUpper(method)
+	if len(method) <= 3 {
+		return method
+	}
+	return method[:3]
 }
 
 // getHandlerName 获取处理器的名称
@@ -353,9 +359,9 @@ func (s *Server) WithGinMiddleware(middleware ...gin.HandlerFunc) {
 // WithContextInjector 设置上下文注入函数
 // 参数withContext为上下文注入函数，用于在请求处理前修改上下文
 // 返回修改后的Server实例，支持链式调用
-func (s Server) WithContextInjector(withContext WithContext) *Server {
+func (s *Server) WithContextInjector(withContext WithContext) *Server {
 	s.contextInjector = withContext
-	return &s
+	return s
 }
 
 // WithContext 定义了上下文注入函数类型

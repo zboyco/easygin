@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"os"
-	"path/filepath"
+	"path"
 	"reflect"
 	"strconv"
 	"strings"
@@ -165,7 +165,7 @@ func generateOperationID(apiType reflect.Type) string {
 
 func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, parentMiddlewareParams ...*openapi3.ParameterRef) error {
 	// 处理当前组的路径前缀
-	basePath := filepath.Join(parentPath, group.path)
+	basePath := joinURLPath(parentPath, group.path)
 
 	// 标记是否需要为当前组创建标签
 	hasApis := false
@@ -225,7 +225,7 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, 
 		hasApis = true
 
 		// 获取 API 路径
-		apiPath := filepath.Join(basePath, reflect.ValueOf(api).MethodByName("Path").Call(nil)[0].String())
+		apiPath := joinURLPath(basePath, api.Path())
 		// 转换为 URL 路径格式
 		apiPath = "/" + strings.TrimPrefix(apiPath, "/")
 		// 将:param格式转换为{param}格式
@@ -490,6 +490,18 @@ func convertPathParams(path string) string {
 		}
 	}
 	return strings.Join(parts, "/")
+}
+
+// joinURLPath 使用 POSIX 风格拼接 URL 路径，避免因操作系统差异导致的反斜杠
+func joinURLPath(parts ...string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	joined := path.Join(parts...)
+	if joined == "." {
+		return ""
+	}
+	return joined
 }
 
 func isTimeTypeOrAlias(t reflect.Type) bool {

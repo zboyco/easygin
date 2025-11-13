@@ -158,10 +158,16 @@ func collectFields(t reflect.Type, indexPrefix []int, fields *[]fieldInfo) {
 
 		tag := field.Tag.Get("in")
 
-		// 处理嵌入字段
-		if tag == "" && field.Anonymous && field.Type.Kind() == reflect.Struct {
-			collectFields(field.Type, index, fields)
-			continue
+		// 处理嵌入字段（支持指针形式）
+		if tag == "" && field.Anonymous {
+			embeddedType := field.Type
+			if embeddedType.Kind() == reflect.Ptr {
+				embeddedType = embeddedType.Elem()
+			}
+			if embeddedType.Kind() == reflect.Struct {
+				collectFields(embeddedType, index, fields)
+				continue
+			}
 		}
 
 		if tag != "" {
@@ -191,6 +197,48 @@ func collectFields(t reflect.Type, indexPrefix []int, fields *[]fieldInfo) {
 	}
 }
 
+// getOrInitFieldByIndex 获取结构体字段，遇到中间的指针字段为nil时自动初始化，避免反射访问嵌入指针时panic
+func getOrInitFieldByIndex(v reflect.Value, index []int) (reflect.Value, error) {
+	current := v
+	for depth, idx := range index {
+		for current.Kind() == reflect.Ptr {
+			if current.IsNil() {
+				if !current.CanSet() {
+					return reflect.Value{}, fmt.Errorf("cannot initialize pointer for embedded field at depth %d", depth)
+				}
+				current.Set(reflect.New(current.Type().Elem()))
+			}
+			current = current.Elem()
+		}
+
+		if current.Kind() != reflect.Struct {
+			return reflect.Value{}, fmt.Errorf("invalid handler definition: non-struct value at depth %d", depth)
+		}
+
+		if idx >= current.NumField() {
+			return reflect.Value{}, fmt.Errorf("invalid handler definition: index %d out of range for %s", idx, current.Type())
+		}
+
+		field := current.Field(idx)
+
+		if depth < len(index)-1 && field.Kind() == reflect.Ptr {
+			if field.IsNil() {
+				if !field.CanSet() {
+					return reflect.Value{}, fmt.Errorf("cannot initialize embedded pointer field %s", current.Type().Field(idx).Name)
+				}
+				elemType := field.Type().Elem()
+				if elemType.Kind() != reflect.Struct {
+					return reflect.Value{}, fmt.Errorf("invalid handler definition: embedded pointer %s does not reference a struct", current.Type().Field(idx).Name)
+				}
+				field.Set(reflect.New(elemType))
+			}
+		}
+
+		current = field
+	}
+	return current, nil
+}
+
 // bindParams 统一处理参数绑定逻辑
 func bindParams(c *gin.Context, h RouterHandler) (RouterHandler, error) {
 	// 获取接口的真实类型
@@ -213,7 +261,10 @@ func bindParams(c *gin.Context, h RouterHandler) (RouterHandler, error) {
 	// 遍历字段信息
 	for _, info := range fields {
 		// 使用FieldByIndex获取嵌套字段
-		fieldValue := handlerValue.FieldByIndex(info.index)
+		fieldValue, err := getOrInitFieldByIndex(handlerValue, info.index)
+		if err != nil {
+			return nil, fmt.Errorf("prepare handler field failed: %w", err)
+		}
 
 		// 处理body参数
 		if info.tagType == "body" {
@@ -224,19 +275,33 @@ func bindParams(c *gin.Context, h RouterHandler) (RouterHandler, error) {
 					return nil, fmt.Errorf("parse multipart form failed: %v", err)
 				}
 
-				// 创建新的结构体实例
-				newStruct := reflect.New(fieldValue.Type()).Interface()
+				targetValue := fieldValue
+				if fieldValue.Kind() == reflect.Ptr {
+					if fieldValue.IsNil() {
+						fieldValue.Set(reflect.New(fieldValue.Type().Elem()))
+					}
+					targetValue = fieldValue
+				} else {
+					targetValue = fieldValue.Addr()
+				}
 
 				// 使用decodeMultipartForm解析表单数据
-				if err := decodeMultipartForm(c.Request.MultipartForm, newStruct); err != nil {
+				if err := decodeMultipartForm(c.Request.MultipartForm, targetValue.Interface()); err != nil {
 					return nil, err
 				}
 
-				// 将解析后的结构体赋值给原字段
-				fieldValue.Set(reflect.ValueOf(newStruct).Elem())
 				continue
 			}
-			if err := decodeJSON(c.Request.Body, fieldValue.Addr().Interface()); err != nil {
+			target := fieldValue
+			if fieldValue.Kind() == reflect.Ptr {
+				if fieldValue.IsNil() {
+					fieldValue.Set(reflect.New(fieldValue.Type().Elem()))
+				}
+				target = fieldValue
+			} else {
+				target = fieldValue.Addr()
+			}
+			if err := decodeJSON(c.Request.Body, target.Interface()); err != nil {
 				return nil, fmt.Errorf("invalid body parameter: %v", err)
 			}
 			continue

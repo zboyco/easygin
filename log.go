@@ -16,11 +16,10 @@ import (
 // middleLogger 创建一个 Gin 中间件，用于记录请求日志并集成 OpenTelemetry 追踪
 // 参数:
 //   - serviceName: 服务名称，用于日志标识
-//   - tracer: OpenTelemetry 追踪器实例
 //
 // 返回:
 //   - gin.HandlerFunc: Gin 中间件函数
-func middleLogger() gin.HandlerFunc {
+func middleLogger(serviceName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 记录请求开始时间，用于计算请求处理耗时
 		startAt := time.Now()

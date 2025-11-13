@@ -460,6 +460,41 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "description": "User Names",
+            "in": "query",
+            "name": "names",
+            "required": true,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "User IDs",
+            "in": "query",
+            "name": "ids",
+            "schema": {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "User bool",
+            "in": "query",
+            "name": "bools",
+            "required": true,
+            "schema": {
+              "items": {
+                "type": "boolean"
+              },
+              "type": "array"
+            }
           }
         ],
         "responses": {
