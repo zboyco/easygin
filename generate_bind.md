@@ -37,15 +37,15 @@
   - `currentPkgPath string` - 当前包路径
 
 ### 4. 参数绑定生成函数
-- `generatePathBinding`: 生成路径参数绑定代码
-- `generateQueryBinding`: 生成查询参数绑定代码；支持识别 `[]T`、`*[]T` 以及 `[]*T` 字段，先判断是否允许为空 (`omitempty`)，再调用切片专用逻辑或回退到单值解析，并对默认值、必填校验等保持一致处理
+- `generatePathBinding`: 生成路径参数绑定代码，签名包含 `currentPkgPath`，用于跨包类型名补全
+- `generateQueryBinding`: 生成查询参数绑定代码；签名包含 `currentPkgPath`，支持识别 `[]T`、`*[]T` 以及 `[]*T` 字段，先判断是否允许为空 (`omitempty`)，再调用切片专用逻辑或回退到单值解析，并对默认值、必填校验等保持一致处理
 - `generateQuerySliceBinding`: 查询参数切片绑定逻辑，使用 `c.QueryArray()` 捕获同名参数数组，针对 string、bool、各类有符号/无符号整数和浮点类型（及其指针）依次转换并回写字段，不支持的类型会直接返回错误
-- `generateHeaderBinding`: 生成头部参数绑定代码
+- `generateHeaderBinding`: 生成头部参数绑定代码，签名包含 `currentPkgPath`
 - `generateBodyBinding`: 生成请求体绑定代码
   - 支持指针类型字段的实例化
   - 针对匿名结构体指针，使用格式化的多行定义提高可读性
   - 针对命名结构体指针，使用标准实例化方式
-- `generateFormBinding`: 生成表单参数绑定代码
+- `generateFormBinding`: 生成表单参数绑定代码，签名包含 `currentPkgPath`
   - 支持单文件上传 (`*multipart.FileHeader`)
   - 支持多文件上传 (`[]*multipart.FileHeader`)
   - 支持字符串数组 (`[]string`)
@@ -53,9 +53,9 @@
   - 支持其他基本类型
 
 ### 5. 类型转换函数
-- `generateValueConversion`: 生成值转换代码
-- `generateValueConversionForType`: 根据类型生成值转换代码
-- `generateTypeConversion`: 生成类型转换代码
+- `generateValueConversion`: 生成值转换代码，签名包含 `currentPkgPath`
+- `generateValueConversionForType`: 根据类型生成值转换代码，优先检测实现 `encoding.TextUnmarshaler` 的类型（含指针接收者），跨包类型自动补充包前缀
+- `generateTypeConversion`: 生成类型转换代码，支持 `TextUnmarshaler` 优先解析并在跨包场景使用 `pkg.Type`，同时触发外部包收集
 - `addZeroValueCheck`: 添加零值检查代码
 
 ### 6. 辅助函数
@@ -81,11 +81,12 @@
 4. 支持必填参数验证
 5. 支持默认值设置
 6. 支持零值检查
-7. 支持multipart表单处理，包括文件上传
-8. 支持JSON请求体绑定和验证
-9. 支持匿名结构体的格式化生成，提高代码可读性
-10. 支持字符串数组和字符串数组指针类型的表单参数处理
-11. 支持查询参数切片的自动绑定，包含切片指针和指针元素
+7. 支持 `encoding.TextUnmarshaler` 类型优先使用 `UnmarshalText` 解析，跨包类型自动补全包前缀并导入
+8. 支持multipart表单处理，包括文件上传
+9. 支持JSON请求体绑定和验证
+10. 支持匿名结构体的格式化生成，提高代码可读性
+11. 支持字符串数组和字符串数组指针类型的表单参数处理
+12. 支持查询参数切片的自动绑定，包含切片指针和指针元素
 
 ## 代码生成流程
 1. 收集所有API并按包分组

@@ -47,7 +47,7 @@ func TestGeneratePathBindingRequired(t *testing.T) {
 	field := reflect.TypeOf(pathStruct{}).Field(0)
 
 	var builder strings.Builder
-	generatePathBinding(&builder, "r.ID", "item_id", field)
+	generatePathBinding(&builder, "r.ID", "item_id", field, reflect.TypeOf(pathStruct{}).PkgPath())
 	output := builder.String()
 
 	if !strings.Contains(output, `return errors.New("missing required parameter 'item_id' in path")`) {
@@ -65,7 +65,7 @@ func TestGenerateQueryBindingOptionalDefault(t *testing.T) {
 	field := reflect.TypeOf(queryStruct{}).Field(0)
 
 	var builder strings.Builder
-	generateQueryBinding(&builder, "r.Name", "name", field)
+	generateQueryBinding(&builder, "r.Name", "name", field, reflect.TypeOf(queryStruct{}).PkgPath())
 	output := builder.String()
 
 	if !strings.Contains(output, `queryVal = "anonymous"`) {

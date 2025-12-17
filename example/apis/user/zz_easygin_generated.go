@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
-	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/zboyco/easygin"
+
+	"github.com/zboyco/easygin/example/types"
 )
 
 func (r *CreateUser) EasyGinBindParameters(c *gin.Context) error {
@@ -135,17 +135,12 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	// 绑定查询参数 startTime
 	{
 		queryVal := c.Query("startTime")
-		if strings.HasPrefix(queryVal, "0000-00-00T00:00:00") {
-			queryVal = ""
-		}
 		if queryVal != "" {
-			t, err := time.Parse(time.RFC3339, queryVal)
-			if err != nil {
-				return fmt.Errorf("invalid time format for parameter 'startTime': %v", err.Error())
+			parsedVal := new(types.Timestamp)
+			if err := parsedVal.UnmarshalText([]byte(queryVal)); err != nil {
+				return fmt.Errorf("invalid parameter 'startTime': %v", err.Error())
 			}
-			if !t.IsZero() {
-				r.StartTime = t
-			}
+			r.StartTime = *parsedVal
 		}
 	}
 	return nil

@@ -2,6 +2,7 @@ package easygin
 
 import (
 	"context"
+	"encoding"
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
@@ -98,6 +99,11 @@ func generateSchema(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3
 		schema := openapi3.NewStringSchema()
 		schema.Format = "binary"
 		return schema
+	}
+
+	// 特殊处理实现 TextUnmarshaler 的类型
+	if isTextUnmarshalerType(t) {
+		return openapi3.NewStringSchema()
 	}
 
 	// 特殊处理time.Time及其衍生类型
@@ -507,6 +513,33 @@ func joinURLPath(parts ...string) string {
 func isTimeTypeOrAlias(t reflect.Type) bool {
 	timeType := reflect.TypeOf(time.Time{})
 	return t.ConvertibleTo(timeType) && t.Kind() == timeType.Kind()
+}
+
+var (
+	textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
+)
+
+func isTextUnmarshalerType(t reflect.Type) bool {
+	if t == nil {
+		return false
+	}
+
+	// 展开指针
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	// 匿名结构体不做 TextUnmarshaler 处理
+	if t.Name() == "" {
+		return false
+	}
+
+	if t.Implements(textUnmarshalerType) {
+		return true
+	}
+
+	ptrType := reflect.PtrTo(t)
+	return ptrType.Implements(textUnmarshalerType)
 }
 
 func isFileHeaderTypeOrAlias(t reflect.Type) bool {

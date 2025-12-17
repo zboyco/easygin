@@ -270,7 +270,6 @@
             "in": "query",
             "name": "startTime",
             "schema": {
-              "format": "date-time",
               "type": "string"
             }
           }

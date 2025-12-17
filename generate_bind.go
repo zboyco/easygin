@@ -2,6 +2,7 @@ package easygin
 
 import (
 	"bufio"
+	"encoding"
 	"fmt"
 	"go/build"
 	"os"
@@ -130,18 +131,18 @@ func processAllFields(builder *strings.Builder, t reflect.Type, prefix string, c
 				fieldName := fmt.Sprintf("%s.%s", prefix, field.Name)
 
 				// 根据in标签类型生成解析代码
-				switch inTag {
-				case "path":
-					generatePathBinding(builder, fieldName, name, field)
-				case "query":
-					generateQueryBinding(builder, fieldName, name, field)
-				case "header":
-					generateHeaderBinding(builder, fieldName, name, field)
-				case "body":
-					generateBodyBinding(builder, fieldName, field, currentPkgPath)
+					switch inTag {
+					case "path":
+						generatePathBinding(builder, fieldName, name, field, currentPkgPath)
+					case "query":
+						generateQueryBinding(builder, fieldName, name, field, currentPkgPath)
+					case "header":
+						generateHeaderBinding(builder, fieldName, name, field, currentPkgPath)
+					case "body":
+						generateBodyBinding(builder, fieldName, field, currentPkgPath)
+					}
 				}
-			}
-			continue
+				continue
 		}
 
 		// 检查是否有in标签
@@ -162,11 +163,11 @@ func processAllFields(builder *strings.Builder, t reflect.Type, prefix string, c
 		// 根据in标签类型生成解析代码
 		switch inTag {
 		case "path":
-			generatePathBinding(builder, fieldName, name, field)
+			generatePathBinding(builder, fieldName, name, field, currentPkgPath)
 		case "query":
-			generateQueryBinding(builder, fieldName, name, field)
+			generateQueryBinding(builder, fieldName, name, field, currentPkgPath)
 		case "header":
-			generateHeaderBinding(builder, fieldName, name, field)
+			generateHeaderBinding(builder, fieldName, name, field, currentPkgPath)
 		case "body":
 			generateBodyBinding(builder, fieldName, field, currentPkgPath)
 		}
@@ -174,7 +175,7 @@ func processAllFields(builder *strings.Builder, t reflect.Type, prefix string, c
 }
 
 // generatePathBinding 生成路径参数绑定代码
-func generatePathBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField) {
+func generatePathBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string) {
 	builder.WriteString(fmt.Sprintf("\t// 绑定路径参数 %s\n", paramName))
 	builder.WriteString("\t{\n") // 添加代码块开始
 	builder.WriteString(fmt.Sprintf("\t\tpathVal := c.Param(\"%s\")\n", paramName))
@@ -213,16 +214,16 @@ func generatePathBinding(builder *strings.Builder, fieldName, paramName string, 
 
 	builder.WriteString("\t\tif pathVal != \"\" {\n")
 	if field.Type.Name() != "" {
-		generateTypeConversion(builder, fieldName, "pathVal", paramName, field.Type, "\t\t\t")
+		generateTypeConversion(builder, fieldName, "pathVal", paramName, field.Type, "\t\t\t", currentPkgPath)
 	} else {
-		generateValueConversion(builder, fieldName, "pathVal", paramName, field.Type)
+		generateValueConversion(builder, fieldName, "pathVal", paramName, field.Type, currentPkgPath)
 	}
 	builder.WriteString("\t\t}\n")
 	builder.WriteString("\t}\n") // 添加代码块结束
 }
 
 // generateQueryBinding 生成查询参数绑定代码
-func generateQueryBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField) {
+func generateQueryBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string) {
 	builder.WriteString(fmt.Sprintf("\t// 绑定查询参数 %s\n", paramName))
 	builder.WriteString("\t{\n") // 添加代码块开始
 	fieldType := field.Type
@@ -277,10 +278,10 @@ func generateQueryBinding(builder *strings.Builder, fieldName, paramName string,
 
 	builder.WriteString("\t\tif queryVal != \"\" {\n")
 	if field.Type.Name() != "" {
-		generateTypeConversion(builder, fieldName, "queryVal", paramName, field.Type, "\t\t\t")
-	} else {
-		generateValueConversion(builder, fieldName, "queryVal", paramName, field.Type)
-	}
+			generateTypeConversion(builder, fieldName, "queryVal", paramName, field.Type, "\t\t\t", currentPkgPath)
+		} else {
+			generateValueConversion(builder, fieldName, "queryVal", paramName, field.Type, currentPkgPath)
+		}
 	builder.WriteString("\t\t}\n")
 	builder.WriteString("\t}\n")
 }
@@ -432,7 +433,7 @@ func isFloatKind(kind reflect.Kind) bool {
 }
 
 // generateHeaderBinding 生成头部参数绑定代码
-func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField) {
+func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string) {
 	builder.WriteString(fmt.Sprintf("\t// 绑定头部参数 %s\n", paramName))
 	builder.WriteString("\t{\n") // 添加代码块开始
 	builder.WriteString(fmt.Sprintf("\t\theaderVal := c.GetHeader(\"%s\")\n", paramName))
@@ -470,10 +471,10 @@ func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string
 
 	builder.WriteString("\t\tif headerVal != \"\" {\n")
 	if field.Type.Name() != "" {
-		generateTypeConversion(builder, fieldName, "headerVal", paramName, field.Type, "\t\t\t")
-	} else {
-		generateValueConversion(builder, fieldName, "headerVal", paramName, field.Type)
-	}
+			generateTypeConversion(builder, fieldName, "headerVal", paramName, field.Type, "\t\t\t", currentPkgPath)
+		} else {
+			generateValueConversion(builder, fieldName, "headerVal", paramName, field.Type, currentPkgPath)
+		}
 	builder.WriteString("\t\t}\n")
 	builder.WriteString("\t}\n")
 }
@@ -558,7 +559,7 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 			name = strings.Split(name, ",")[0]
 
 			// 使用 generateFormBinding 处理表单字段
-			generateFormBinding(builder, fmt.Sprintf("%s.%s", fieldName, subField.Name), name, subField)
+			generateFormBinding(builder, fmt.Sprintf("%s.%s", fieldName, subField.Name), name, subField, currentPkgPath)
 		}
 	} else {
 		builder.WriteString("\t{\n") // 添加代码块开始
@@ -590,7 +591,7 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 	}
 }
 
-func generateFormBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField) {
+func generateFormBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string) {
 	builder.WriteString(fmt.Sprintf("\t// 绑定表单参数 %s\n", paramName))
 	builder.WriteString("\t{\n") // 添加代码块开始
 
@@ -675,9 +676,9 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 
 		builder.WriteString("\t\tif formVal != \"\" {\n")
 		if field.Type.Name() != "" {
-			generateTypeConversion(builder, fieldName, "formVal", paramName, field.Type, "\t\t\t")
+			generateTypeConversion(builder, fieldName, "formVal", paramName, field.Type, "\t\t\t", currentPkgPath)
 		} else {
-			generateValueConversion(builder, fieldName, "formVal", paramName, field.Type)
+			generateValueConversion(builder, fieldName, "formVal", paramName, field.Type, currentPkgPath)
 		}
 		builder.WriteString("\t\t}\n")
 	}
@@ -685,12 +686,12 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 }
 
 // generateValueConversion 生成值转换代码
-func generateValueConversion(builder *strings.Builder, fieldName, valName, paramName string, fieldType reflect.Type) {
+func generateValueConversion(builder *strings.Builder, fieldName, valName, paramName string, fieldType reflect.Type, currentPkgPath string) {
 	// 处理指针类型
 	if fieldType.Kind() == reflect.Ptr {
 		builder.WriteString("\t\tif " + valName + " != \"\" {\n")                                          // 增加缩进
 		builder.WriteString(fmt.Sprintf("\t\t\ttmpVal := new(%s)\n", fieldType.Elem().Name()))             // 增加缩进
-		generateValueConversionForType(builder, "*tmpVal", valName, paramName, fieldType.Elem(), "\t\t\t") // 增加缩进
+		generateValueConversionForType(builder, "*tmpVal", valName, paramName, fieldType.Elem(), "\t\t\t", currentPkgPath) // 增加缩进
 		builder.WriteString(fmt.Sprintf("\t\t\t%s = tmpVal\n", fieldName))                                 // 增加缩进
 		builder.WriteString("\t\t}\n")                                                                     // 增加缩进
 		return
@@ -698,12 +699,17 @@ func generateValueConversion(builder *strings.Builder, fieldName, valName, param
 
 	// 处理非指针类型
 	builder.WriteString("\t\tif " + valName + " != \"\" {\n")                                   // 增加缩进
-	generateValueConversionForType(builder, fieldName, valName, paramName, fieldType, "\t\t\t") // 增加缩进
+	generateValueConversionForType(builder, fieldName, valName, paramName, fieldType, "\t\t\t", currentPkgPath) // 增加缩进
 	builder.WriteString("\t\t}\n")                                                              // 增加缩进
 }
 
 // generateValueConversionForType 根据类型生成值转换代码
-func generateValueConversionForType(builder *strings.Builder, fieldName, valName, paramName string, fieldType reflect.Type, indent string) {
+func generateValueConversionForType(builder *strings.Builder, fieldName, valName, paramName string, fieldType reflect.Type, indent string, currentPkgPath string) {
+	if info, ok := getTextUnmarshalInfo(fieldType, currentPkgPath); ok {
+		generateTextUnmarshalConversion(builder, fieldName, valName, paramName, info, indent)
+		return
+	}
+
 	// 处理time.Time类型
 	if fieldType.String() == "time.Time" {
 		builder.WriteString(indent + fmt.Sprintf("t, err := time.Parse(time.RFC3339, %s)\n", valName))
@@ -758,6 +764,66 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 		builder.WriteString(indent + fmt.Sprintf("// 不支持的类型: %s\n", fieldType.Kind().String()))
 		builder.WriteString(indent + fmt.Sprintf("return errors.New(\"unsupported parameter type: %s for field %s\")\n", fieldType.Kind().String(), paramName))
 	}
+}
+
+var bindTextUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
+
+type textUnmarshalInfo struct {
+	typeName           string
+	usePointerReceiver bool
+}
+
+func getTextUnmarshalInfo(fieldType reflect.Type, currentPkgPath string) (textUnmarshalInfo, bool) {
+	if fieldType == nil {
+		return textUnmarshalInfo{}, false
+	}
+
+	for fieldType.Kind() == reflect.Ptr {
+		fieldType = fieldType.Elem()
+	}
+
+	if fieldType.Name() == "" {
+		return textUnmarshalInfo{}, false
+	}
+
+	typeName := fieldType.Name()
+	if pkgPath := fieldType.PkgPath(); pkgPath != "" && pkgPath != currentPkgPath {
+		typeName = filepath.Base(pkgPath) + "." + typeName
+	}
+
+	if fieldType.Implements(bindTextUnmarshalerType) {
+		return textUnmarshalInfo{
+			typeName:           typeName,
+			usePointerReceiver: false,
+		}, true
+	}
+
+	ptrType := reflect.PtrTo(fieldType)
+	if ptrType.Implements(bindTextUnmarshalerType) {
+		return textUnmarshalInfo{
+			typeName:           typeName,
+			usePointerReceiver: true,
+		}, true
+	}
+
+	return textUnmarshalInfo{}, false
+}
+
+func generateTextUnmarshalConversion(builder *strings.Builder, fieldName, valName, paramName string, info textUnmarshalInfo, indent string) {
+	if info.usePointerReceiver {
+		builder.WriteString(indent + fmt.Sprintf("parsedVal := new(%s)\n", info.typeName))
+		builder.WriteString(indent + fmt.Sprintf("if err := parsedVal.UnmarshalText([]byte(%s)); err != nil {\n", valName))
+		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
+		builder.WriteString(indent + "}\n")
+		builder.WriteString(indent + fmt.Sprintf("%s = *parsedVal\n", fieldName))
+		return
+	}
+
+	builder.WriteString(indent + fmt.Sprintf("var parsedVal %s\n", info.typeName))
+	builder.WriteString(indent + fmt.Sprintf("if err := parsedVal.UnmarshalText([]byte(%s)); err != nil {\n", valName))
+	builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
+	builder.WriteString(indent + "}\n")
+	builder.WriteString(indent + fmt.Sprintf("%s = parsedVal\n", fieldName))
 }
 
 // 添加一个函数来处理路由组中的所有API
@@ -1089,16 +1155,21 @@ func parseModulePath(goModPath string) (string, error) {
 }
 
 // generateTypeConversion 生成类型转换代码
-func generateTypeConversion(builder *strings.Builder, fieldName, valName, paramName string, fieldType reflect.Type, indent string) {
+func generateTypeConversion(builder *strings.Builder, fieldName, valName, paramName string, fieldType reflect.Type, indent string, currentPkgPath string) {
 	// 获取底层类型
 	underlyingKind := fieldType.Kind()
 
 	// 检查是否是外部包的类型
 	typeName := fieldType.Name()
-	if fieldType.PkgPath() != "" && !isBuiltinType(fieldType) {
+	if fieldType.PkgPath() != "" && fieldType.PkgPath() != currentPkgPath {
 		// 使用完整的包路径.类型名
 		pkgName := filepath.Base(fieldType.PkgPath())
 		typeName = pkgName + "." + typeName
+	}
+
+	if info, ok := getTextUnmarshalInfo(fieldType, currentPkgPath); ok {
+		generateTextUnmarshalConversion(builder, fieldName, valName, paramName, info, indent)
+		return
 	}
 
 	// 根据底层类型生成转换代码
@@ -1132,7 +1203,7 @@ func generateTypeConversion(builder *strings.Builder, fieldName, valName, paramN
 		builder.WriteString(indent + fmt.Sprintf("%s = %s(boolVal)\n", fieldName, typeName))
 	default:
 		// 对于其他类型，使用通用的转换方法
-		generateValueConversionForType(builder, fieldName, valName, paramName, fieldType, indent)
+		generateValueConversionForType(builder, fieldName, valName, paramName, fieldType, indent, currentPkgPath)
 	}
 }
 
