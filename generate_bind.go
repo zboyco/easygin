@@ -983,6 +983,9 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 		}
 		sort.Strings(externalPkgs)
 		for _, pkg := range externalPkgs {
+			if usedImports[pkg] { // 已经在基础导入列表中启用的包避免重复导入
+				continue
+			}
 			builder.WriteString(fmt.Sprintf("\t\"%s\"\n", pkg))
 		}
 	}
