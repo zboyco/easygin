@@ -5,18 +5,32 @@ import (
 	"time"
 )
 
-type Timestamp time.Time
+type (
+	AliasString  = string
+	AliasBool    = bool
+	AliasInt     = int
+	AliasUint64  = uint64
+	AliasFloat64 = float64
+	AliasTime    = time.Time
+
+	CustomString  string
+	CustomBool    bool
+	CustomInt     int
+	CustomUint64  uint64
+	CustomFloat64 float64
+	CustomTime    time.Time
+)
 
 var _ interface {
 	encoding.TextMarshaler
 	encoding.TextUnmarshaler
-} = (*Timestamp)(nil)
+} = (*CustomTime)(nil)
 
-func (dt Timestamp) MarshalText() ([]byte, error) {
+func (dt CustomTime) MarshalText() ([]byte, error) {
 	return []byte(dt.String()), nil
 }
 
-func (dt *Timestamp) UnmarshalText(data []byte) (err error) {
+func (dt *CustomTime) UnmarshalText(data []byte) (err error) {
 	str := string(data)
 	if len(str) == 0 || str == "0" {
 		return nil
@@ -25,30 +39,30 @@ func (dt *Timestamp) UnmarshalText(data []byte) (err error) {
 	return
 }
 
-func (dt Timestamp) String() string {
+func (dt CustomTime) String() string {
 	if dt.IsZero() {
 		return ""
 	}
 	return time.Time(dt).In(CST).Format(time.RFC3339)
 }
 
-func ParseTimestampFromString(s string) (dt Timestamp, err error) {
+func ParseTimestampFromString(s string) (dt CustomTime, err error) {
 	var t time.Time
 	t, err = time.Parse(time.RFC3339, s)
-	dt = Timestamp(t)
+	dt = CustomTime(t)
 	return
 }
 
-func (dt Timestamp) IsZero() bool {
+func (dt CustomTime) IsZero() bool {
 	unix := dt.Unix()
 	return unix == 0 || unix == TimestampZero.Unix()
 }
 
-func (dt Timestamp) Unix() int64 {
+func (dt CustomTime) Unix() int64 {
 	return time.Time(dt).Unix()
 }
 
 var (
 	CST           = time.FixedZone("CST", 8*60*60)
-	TimestampZero = Timestamp(time.Time{})
+	TimestampZero = CustomTime(time.Time{})
 )

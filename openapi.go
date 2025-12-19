@@ -529,6 +529,12 @@ func isTextUnmarshalerType(t reflect.Type) bool {
 		t = t.Elem()
 	}
 
+	// 仅豁免 time.Time 及其别名（保持由时间分支处理）；自定义新类型不豁免
+	timeType := reflect.TypeOf(time.Time{})
+	if t == timeType {
+		return false
+	}
+
 	// 匿名结构体不做 TextUnmarshaler 处理
 	if t.Name() == "" {
 		return false

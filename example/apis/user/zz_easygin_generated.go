@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/zboyco/easygin"
@@ -108,39 +110,650 @@ func (r *GetUser) EasyGinBindParameters(c *gin.Context) error {
 }
 
 func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
-	// 绑定查询参数 name
+	// 绑定查询参数 stdStr
 	{
-		queryVal := c.Query("name")
+		queryVal := c.Query("stdStr")
+		if queryVal == "" {
+			queryVal = "std-str"
+		}
 		if queryVal != "" {
-			r.Name = string(queryVal)
+			r.StdStr = string(queryVal)
 		}
 	}
-	// 绑定查询参数 ageMin
+	// 绑定查询参数 stdBool
 	{
-		queryVal := c.Query("ageMin")
+		queryVal := c.Query("stdBool")
+		if queryVal == "false" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "true"
+		}
+		if queryVal != "" {
+			boolVal, err := strconv.ParseBool(queryVal)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'stdBool': %v", err.Error())
+			}
+			r.StdBool = bool(boolVal)
+		}
+	}
+	// 绑定查询参数 stdInt
+	{
+		queryVal := c.Query("stdInt")
 		if queryVal == "0" {
 			queryVal = ""
 		}
 		if queryVal == "" {
-			queryVal = "18"
+			queryVal = "1"
 		}
 		if queryVal != "" {
 			intVal, err := strconv.ParseInt(queryVal, 10, 64)
 			if err != nil {
-				return fmt.Errorf("invalid parameter 'ageMin': %v", err.Error())
+				return fmt.Errorf("invalid parameter 'stdInt': %v", err.Error())
 			}
-			r.AgeMin = int(intVal)
+			r.StdInt = int(intVal)
 		}
 	}
-	// 绑定查询参数 startTime
+	// 绑定查询参数 stdInt64
 	{
-		queryVal := c.Query("startTime")
+		queryVal := c.Query("stdInt64")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "64"
+		}
 		if queryVal != "" {
-			parsedVal := new(types.Timestamp)
-			if err := parsedVal.UnmarshalText([]byte(queryVal)); err != nil {
-				return fmt.Errorf("invalid parameter 'startTime': %v", err.Error())
+			intVal, err := strconv.ParseInt(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'stdInt64': %v", err.Error())
 			}
-			r.StartTime = *parsedVal
+			r.StdInt64 = int64(intVal)
+		}
+	}
+	// 绑定查询参数 stdUint
+	{
+		queryVal := c.Query("stdUint")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "2"
+		}
+		if queryVal != "" {
+			uintVal, err := strconv.ParseUint(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'stdUint': %v", err.Error())
+			}
+			r.StdUint = uint(uintVal)
+		}
+	}
+	// 绑定查询参数 stdUint64
+	{
+		queryVal := c.Query("stdUint64")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "10"
+		}
+		if queryVal != "" {
+			uintVal, err := strconv.ParseUint(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'stdUint64': %v", err.Error())
+			}
+			r.StdUint64 = uint64(uintVal)
+		}
+	}
+	// 绑定查询参数 stdFloat32
+	{
+		queryVal := c.Query("stdFloat32")
+		tempVal, err := strconv.ParseFloat(queryVal, 64)
+		if err == nil && tempVal == 0.0 {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "1.25"
+		}
+		if queryVal != "" {
+			floatVal, err := strconv.ParseFloat(queryVal, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'stdFloat32': %v", err.Error())
+			}
+			r.StdFloat32 = float32(floatVal)
+		}
+	}
+	// 绑定查询参数 stdFloat64
+	{
+		queryVal := c.Query("stdFloat64")
+		tempVal, err := strconv.ParseFloat(queryVal, 64)
+		if err == nil && tempVal == 0.0 {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "3.14"
+		}
+		if queryVal != "" {
+			floatVal, err := strconv.ParseFloat(queryVal, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'stdFloat64': %v", err.Error())
+			}
+			r.StdFloat64 = float64(floatVal)
+		}
+	}
+	// 绑定查询参数 stdTime
+	{
+		queryVal := c.Query("stdTime")
+		if strings.HasPrefix(queryVal, "0000-00-00T00:00:00") {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "2024-01-01T00:00:00Z"
+		}
+		if queryVal != "" {
+			parsedVal := new(time.Time)
+			if err := parsedVal.UnmarshalText([]byte(queryVal)); err != nil {
+				return fmt.Errorf("invalid parameter 'stdTime': %v", err.Error())
+			}
+			r.StdTime = *parsedVal
+		}
+	}
+	// 绑定查询参数 aliasStr
+	{
+		queryVal := c.Query("aliasStr")
+		if queryVal == "" {
+			queryVal = "alias-str"
+		}
+		if queryVal != "" {
+			r.AliasStr = string(queryVal)
+		}
+	}
+	// 绑定查询参数 aliasBool
+	{
+		queryVal := c.Query("aliasBool")
+		if queryVal == "false" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "false"
+		}
+		if queryVal != "" {
+			boolVal, err := strconv.ParseBool(queryVal)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'aliasBool': %v", err.Error())
+			}
+			r.AliasBoolVal = bool(boolVal)
+		}
+	}
+	// 绑定查询参数 aliasInt
+	{
+		queryVal := c.Query("aliasInt")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "12"
+		}
+		if queryVal != "" {
+			intVal, err := strconv.ParseInt(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'aliasInt': %v", err.Error())
+			}
+			r.AliasIntVal = int(intVal)
+		}
+	}
+	// 绑定查询参数 aliasUint
+	{
+		queryVal := c.Query("aliasUint")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "22"
+		}
+		if queryVal != "" {
+			uintVal, err := strconv.ParseUint(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'aliasUint': %v", err.Error())
+			}
+			r.AliasUintVal = uint64(uintVal)
+		}
+	}
+	// 绑定查询参数 aliasFloat
+	{
+		queryVal := c.Query("aliasFloat")
+		tempVal, err := strconv.ParseFloat(queryVal, 64)
+		if err == nil && tempVal == 0.0 {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "6.28"
+		}
+		if queryVal != "" {
+			floatVal, err := strconv.ParseFloat(queryVal, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'aliasFloat': %v", err.Error())
+			}
+			r.AliasFloatVal = float64(floatVal)
+		}
+	}
+	// 绑定查询参数 aliasTime
+	{
+		queryVal := c.Query("aliasTime")
+		if strings.HasPrefix(queryVal, "0000-00-00T00:00:00") {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "2024-02-01T00:00:00Z"
+		}
+		if queryVal != "" {
+			parsedVal := new(time.Time)
+			if err := parsedVal.UnmarshalText([]byte(queryVal)); err != nil {
+				return fmt.Errorf("invalid parameter 'aliasTime': %v", err.Error())
+			}
+			r.AliasTimeVal = *parsedVal
+		}
+	}
+	// 绑定查询参数 customStr
+	{
+		queryVal := c.Query("customStr")
+		if queryVal == "" {
+			queryVal = "custom-str"
+		}
+		if queryVal != "" {
+			r.CustomStr = types.CustomString(queryVal)
+		}
+	}
+	// 绑定查询参数 customBool
+	{
+		queryVal := c.Query("customBool")
+		if queryVal == "false" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "true"
+		}
+		if queryVal != "" {
+			boolVal, err := strconv.ParseBool(queryVal)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'customBool': %v", err.Error())
+			}
+			r.CustomBoolVal = types.CustomBool(boolVal)
+		}
+	}
+	// 绑定查询参数 customInt
+	{
+		queryVal := c.Query("customInt")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "30"
+		}
+		if queryVal != "" {
+			intVal, err := strconv.ParseInt(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'customInt': %v", err.Error())
+			}
+			r.CustomIntVal = types.CustomInt(intVal)
+		}
+	}
+	// 绑定查询参数 customUint
+	{
+		queryVal := c.Query("customUint")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "40"
+		}
+		if queryVal != "" {
+			uintVal, err := strconv.ParseUint(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'customUint': %v", err.Error())
+			}
+			r.CustomUintVal = types.CustomUint64(uintVal)
+		}
+	}
+	// 绑定查询参数 customFloat
+	{
+		queryVal := c.Query("customFloat")
+		tempVal, err := strconv.ParseFloat(queryVal, 64)
+		if err == nil && tempVal == 0.0 {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "9.9"
+		}
+		if queryVal != "" {
+			floatVal, err := strconv.ParseFloat(queryVal, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'customFloat': %v", err.Error())
+			}
+			r.CustomFloatVal = types.CustomFloat64(floatVal)
+		}
+	}
+	// 绑定查询参数 customTime
+	{
+		queryVal := c.Query("customTime")
+		if queryVal == "" {
+			queryVal = "2024-03-01T00:00:00Z"
+		}
+		if queryVal != "" {
+			parsedVal := new(types.CustomTime)
+			if err := parsedVal.UnmarshalText([]byte(queryVal)); err != nil {
+				return fmt.Errorf("invalid parameter 'customTime': %v", err.Error())
+			}
+			r.CustomTimeVal = *parsedVal
+		}
+	}
+	// 绑定查询参数 stdStrPtr
+	{
+		queryVal := c.Query("stdStrPtr")
+		if queryVal == "" {
+			queryVal = "std-str"
+		}
+		if queryVal != "" {
+			tmpVal := new(string)
+			if queryVal != "" {
+				*tmpVal = string(queryVal)
+			}
+			r.PtrStdStr = tmpVal
+		}
+	}
+	// 绑定查询参数 stdBoolPtr
+	{
+		queryVal := c.Query("stdBoolPtr")
+		if queryVal == "false" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "true"
+		}
+		if queryVal != "" {
+			tmpVal := new(bool)
+			boolVal, err := strconv.ParseBool(queryVal)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'stdBoolPtr': %v", err.Error())
+			}
+			if boolVal {
+				*tmpVal = bool(boolVal)
+			}
+			r.PtrStdBool = tmpVal
+		}
+	}
+	// 绑定查询参数 stdIntPtr
+	{
+		queryVal := c.Query("stdIntPtr")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "2"
+		}
+		if queryVal != "" {
+			tmpVal := new(int)
+			intVal, err := strconv.ParseInt(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'stdIntPtr': %v", err.Error())
+			}
+			if intVal != 0 {
+				*tmpVal = int(intVal)
+			}
+			r.PtrStdInt = tmpVal
+		}
+	}
+	// 绑定查询参数 stdInt64Ptr
+	{
+		queryVal := c.Query("stdInt64Ptr")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "128"
+		}
+		if queryVal != "" {
+			tmpVal := new(int64)
+			intVal, err := strconv.ParseInt(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'stdInt64Ptr': %v", err.Error())
+			}
+			if intVal != 0 {
+				*tmpVal = int64(intVal)
+			}
+			r.PtrStdInt64 = tmpVal
+		}
+	}
+	// 绑定查询参数 stdUint64Ptr
+	{
+		queryVal := c.Query("stdUint64Ptr")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "80"
+		}
+		if queryVal != "" {
+			tmpVal := new(uint64)
+			uintVal, err := strconv.ParseUint(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'stdUint64Ptr': %v", err.Error())
+			}
+			if uintVal != 0 {
+				*tmpVal = uint64(uintVal)
+			}
+			r.PtrStdUint64 = tmpVal
+		}
+	}
+	// 绑定查询参数 stdFloat64Ptr
+	{
+		queryVal := c.Query("stdFloat64Ptr")
+		tempVal, err := strconv.ParseFloat(queryVal, 64)
+		if err == nil && tempVal == 0.0 {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "2.71"
+		}
+		if queryVal != "" {
+			tmpVal := new(float64)
+			floatVal, err := strconv.ParseFloat(queryVal, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'stdFloat64Ptr': %v", err.Error())
+			}
+			if floatVal != 0 {
+				*tmpVal = float64(floatVal)
+			}
+			r.PtrStdFloat64 = tmpVal
+		}
+	}
+	// 绑定查询参数 stdTimePtr
+	{
+		queryVal := c.Query("stdTimePtr")
+		if strings.HasPrefix(queryVal, "0000-00-00T00:00:00") {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "2024-04-01T00:00:00Z"
+		}
+		if queryVal != "" {
+			tmpVal := new(time.Time)
+			if err := tmpVal.UnmarshalText([]byte(queryVal)); err != nil {
+				return fmt.Errorf("invalid parameter 'stdTimePtr': %v", err.Error())
+			}
+			r.PtrStdTime = tmpVal
+		}
+	}
+	// 绑定查询参数 aliasStrPtr
+	{
+		queryVal := c.Query("aliasStrPtr")
+		if queryVal == "" {
+			queryVal = "alias-str"
+		}
+		if queryVal != "" {
+			tmpVal := new(string)
+			if queryVal != "" {
+				*tmpVal = string(queryVal)
+			}
+			r.PtrAliasStr = tmpVal
+		}
+	}
+	// 绑定查询参数 aliasBoolPtr
+	{
+		queryVal := c.Query("aliasBoolPtr")
+		if queryVal == "false" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "true"
+		}
+		if queryVal != "" {
+			tmpVal := new(bool)
+			boolVal, err := strconv.ParseBool(queryVal)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'aliasBoolPtr': %v", err.Error())
+			}
+			if boolVal {
+				*tmpVal = bool(boolVal)
+			}
+			r.PtrAliasBool = tmpVal
+		}
+	}
+	// 绑定查询参数 aliasIntPtr
+	{
+		queryVal := c.Query("aliasIntPtr")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "52"
+		}
+		if queryVal != "" {
+			tmpVal := new(int)
+			intVal, err := strconv.ParseInt(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'aliasIntPtr': %v", err.Error())
+			}
+			if intVal != 0 {
+				*tmpVal = int(intVal)
+			}
+			r.PtrAliasInt = tmpVal
+		}
+	}
+	// 绑定查询参数 aliasUintPtr
+	{
+		queryVal := c.Query("aliasUintPtr")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "60"
+		}
+		if queryVal != "" {
+			tmpVal := new(uint64)
+			uintVal, err := strconv.ParseUint(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'aliasUintPtr': %v", err.Error())
+			}
+			if uintVal != 0 {
+				*tmpVal = uint64(uintVal)
+			}
+			r.PtrAliasUint = tmpVal
+		}
+	}
+	// 绑定查询参数 aliasFloatPtr
+	{
+		queryVal := c.Query("aliasFloatPtr")
+		tempVal, err := strconv.ParseFloat(queryVal, 64)
+		if err == nil && tempVal == 0.0 {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "3.14"
+		}
+		if queryVal != "" {
+			tmpVal := new(float64)
+			floatVal, err := strconv.ParseFloat(queryVal, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'aliasFloatPtr': %v", err.Error())
+			}
+			if floatVal != 0 {
+				*tmpVal = float64(floatVal)
+			}
+			r.PtrAliasFloat = tmpVal
+		}
+	}
+	// 绑定查询参数 aliasTimePtr
+	{
+		queryVal := c.Query("aliasTimePtr")
+		if strings.HasPrefix(queryVal, "0000-00-00T00:00:00") {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "2024-05-01T00:00:00Z"
+		}
+		if queryVal != "" {
+			tmpVal := new(time.Time)
+			if err := tmpVal.UnmarshalText([]byte(queryVal)); err != nil {
+				return fmt.Errorf("invalid parameter 'aliasTimePtr': %v", err.Error())
+			}
+			r.PtrAliasTime = tmpVal
+		}
+	}
+	// 绑定查询参数 customIntPtr
+	{
+		queryVal := c.Query("customIntPtr")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "70"
+		}
+		if queryVal != "" {
+			tmpVal := new(types.CustomInt)
+			intVal, err := strconv.ParseInt(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'customIntPtr': %v", err.Error())
+			}
+			if intVal != 0 {
+				*tmpVal = types.CustomInt(intVal)
+			}
+			r.PtrCustomInt = tmpVal
+		}
+	}
+	// 绑定查询参数 customBoolPtr
+	{
+		queryVal := c.Query("customBoolPtr")
+		if queryVal == "false" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			queryVal = "false"
+		}
+		if queryVal != "" {
+			tmpVal := new(types.CustomBool)
+			boolVal, err := strconv.ParseBool(queryVal)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'customBoolPtr': %v", err.Error())
+			}
+			if boolVal {
+				*tmpVal = types.CustomBool(boolVal)
+			}
+			r.PtrCustomBool = tmpVal
+		}
+	}
+	// 绑定查询参数 customTimePtr
+	{
+		queryVal := c.Query("customTimePtr")
+		if queryVal == "" {
+			queryVal = "2024-06-01T00:00:00Z"
+		}
+		if queryVal != "" {
+			tmpVal := new(types.CustomTime)
+			if err := tmpVal.UnmarshalText([]byte(queryVal)); err != nil {
+				return fmt.Errorf("invalid parameter 'customTimePtr': %v", err.Error())
+			}
+			r.PtrCustomTime = tmpVal
 		}
 	}
 	return nil

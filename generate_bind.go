@@ -216,7 +216,7 @@ func generatePathBinding(builder *strings.Builder, fieldName, paramName string, 
 	if field.Type.Name() != "" {
 		generateTypeConversion(builder, fieldName, "pathVal", paramName, field.Type, "\t\t\t", currentPkgPath)
 	} else {
-		generateValueConversion(builder, fieldName, "pathVal", paramName, field.Type, currentPkgPath)
+		generateValueConversion(builder, fieldName, "pathVal", paramName, "\t\t\t", field.Type, currentPkgPath)
 	}
 	builder.WriteString("\t\t}\n")
 	builder.WriteString("\t}\n") // 添加代码块结束
@@ -278,10 +278,10 @@ func generateQueryBinding(builder *strings.Builder, fieldName, paramName string,
 
 	builder.WriteString("\t\tif queryVal != \"\" {\n")
 	if field.Type.Name() != "" {
-			generateTypeConversion(builder, fieldName, "queryVal", paramName, field.Type, "\t\t\t", currentPkgPath)
-		} else {
-			generateValueConversion(builder, fieldName, "queryVal", paramName, field.Type, currentPkgPath)
-		}
+		generateTypeConversion(builder, fieldName, "queryVal", paramName, field.Type, "\t\t\t", currentPkgPath)
+	} else {
+		generateValueConversion(builder, fieldName, "queryVal", paramName, "\t\t\t", field.Type, currentPkgPath)
+	}
 	builder.WriteString("\t\t}\n")
 	builder.WriteString("\t}\n")
 }
@@ -471,10 +471,10 @@ func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string
 
 	builder.WriteString("\t\tif headerVal != \"\" {\n")
 	if field.Type.Name() != "" {
-			generateTypeConversion(builder, fieldName, "headerVal", paramName, field.Type, "\t\t\t", currentPkgPath)
-		} else {
-			generateValueConversion(builder, fieldName, "headerVal", paramName, field.Type, currentPkgPath)
-		}
+		generateTypeConversion(builder, fieldName, "headerVal", paramName, field.Type, "\t\t\t", currentPkgPath)
+	} else {
+		generateValueConversion(builder, fieldName, "headerVal", paramName, "\t\t\t", field.Type, currentPkgPath)
+	}
 	builder.WriteString("\t\t}\n")
 	builder.WriteString("\t}\n")
 }
@@ -678,29 +678,53 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 		if field.Type.Name() != "" {
 			generateTypeConversion(builder, fieldName, "formVal", paramName, field.Type, "\t\t\t", currentPkgPath)
 		} else {
-			generateValueConversion(builder, fieldName, "formVal", paramName, field.Type, currentPkgPath)
+			generateValueConversion(builder, fieldName, "formVal", paramName, "\t\t\t", field.Type, currentPkgPath)
 		}
 		builder.WriteString("\t\t}\n")
 	}
 	builder.WriteString("\t}\n") // 添加代码块结束
 }
 
+// 生成包含包名前缀的类型名称
+func getTypeNameWithPkg(fieldType reflect.Type, currentPkgPath string) string {
+	for fieldType.Kind() == reflect.Ptr {
+		fieldType = fieldType.Elem()
+	}
+
+	if fieldType.Name() == "" {
+		return fieldType.String()
+	}
+
+	if pkgPath := fieldType.PkgPath(); pkgPath != "" && pkgPath != currentPkgPath {
+		return filepath.Base(pkgPath) + "." + fieldType.Name()
+	}
+
+	return fieldType.Name()
+}
+
 // generateValueConversion 生成值转换代码
-func generateValueConversion(builder *strings.Builder, fieldName, valName, paramName string, fieldType reflect.Type, currentPkgPath string) {
+func generateValueConversion(builder *strings.Builder, fieldName, valName, paramName, indent string, fieldType reflect.Type, currentPkgPath string) {
 	// 处理指针类型
 	if fieldType.Kind() == reflect.Ptr {
-		builder.WriteString("\t\tif " + valName + " != \"\" {\n")                                          // 增加缩进
-		builder.WriteString(fmt.Sprintf("\t\t\ttmpVal := new(%s)\n", fieldType.Elem().Name()))             // 增加缩进
-		generateValueConversionForType(builder, "*tmpVal", valName, paramName, fieldType.Elem(), "\t\t\t", currentPkgPath) // 增加缩进
-		builder.WriteString(fmt.Sprintf("\t\t\t%s = tmpVal\n", fieldName))                                 // 增加缩进
-		builder.WriteString("\t\t}\n")                                                                     // 增加缩进
+		// 优先处理实现了 TextUnmarshal 的指针类型，避免生成二次指针赋值
+		if info, ok := getTextUnmarshalInfo(fieldType, currentPkgPath); ok {
+			builder.WriteString(fmt.Sprintf("%stmpVal := new(%s)\n", indent, info.typeName))
+			builder.WriteString(fmt.Sprintf("%sif err := tmpVal.UnmarshalText([]byte(%s)); err != nil {\n", indent, valName))
+			builder.WriteString(fmt.Sprintf("%s\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", indent, paramName))
+			builder.WriteString(fmt.Sprintf("%s}\n", indent))
+			builder.WriteString(fmt.Sprintf("%s%s = tmpVal\n", indent, fieldName))
+			return
+		}
+
+		typeName := getTypeNameWithPkg(fieldType.Elem(), currentPkgPath)
+		builder.WriteString(fmt.Sprintf("%stmpVal := new(%s)\n", indent, typeName))
+		generateValueConversionForType(builder, "*tmpVal", valName, paramName, fieldType.Elem(), indent, currentPkgPath)
+		builder.WriteString(fmt.Sprintf("%s%s = tmpVal\n", indent, fieldName))
 		return
 	}
 
 	// 处理非指针类型
-	builder.WriteString("\t\tif " + valName + " != \"\" {\n")                                   // 增加缩进
-	generateValueConversionForType(builder, fieldName, valName, paramName, fieldType, "\t\t\t", currentPkgPath) // 增加缩进
-	builder.WriteString("\t\t}\n")                                                              // 增加缩进
+	generateValueConversionForType(builder, fieldName, valName, paramName, fieldType, indent, currentPkgPath)
 }
 
 // generateValueConversionForType 根据类型生成值转换代码
@@ -722,11 +746,13 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 		return
 	}
 
+	typeName := getTypeNameWithPkg(fieldType, currentPkgPath)
+
 	// 处理基本类型
 	switch fieldType.Kind() {
 	case reflect.String:
 		builder.WriteString(indent + fmt.Sprintf("if %s != \"\" {\n", valName))
-		builder.WriteString(indent + fmt.Sprintf("\t%s = %s\n", fieldName, valName))
+		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(%s)\n", fieldName, typeName, valName))
 		builder.WriteString(indent + "}\n")
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		builder.WriteString(indent + fmt.Sprintf("intVal, err := strconv.ParseInt(%s, 10, 64)\n", valName))
@@ -734,7 +760,7 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
 		builder.WriteString(indent + "if intVal != 0 {\n") // 检查是否为零值
-		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(intVal)\n", fieldName, fieldType.Name()))
+		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(intVal)\n", fieldName, typeName))
 		builder.WriteString(indent + "}\n")
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		builder.WriteString(indent + fmt.Sprintf("uintVal, err := strconv.ParseUint(%s, 10, 64)\n", valName))
@@ -742,7 +768,7 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
 		builder.WriteString(indent + "if uintVal != 0 {\n") // 检查是否为零值
-		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(uintVal)\n", fieldName, fieldType.Name()))
+		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(uintVal)\n", fieldName, typeName))
 		builder.WriteString(indent + "}\n")
 	case reflect.Float32, reflect.Float64:
 		builder.WriteString(indent + fmt.Sprintf("floatVal, err := strconv.ParseFloat(%s, 64)\n", valName))
@@ -750,7 +776,7 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
 		builder.WriteString(indent + "if floatVal != 0 {\n") // 检查是否为零值
-		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(floatVal)\n", fieldName, fieldType.Name()))
+		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(floatVal)\n", fieldName, typeName))
 		builder.WriteString(indent + "}\n")
 	case reflect.Bool:
 		builder.WriteString(indent + fmt.Sprintf("boolVal, err := strconv.ParseBool(%s)\n", valName))
@@ -758,7 +784,7 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
 		builder.WriteString(indent + "if boolVal {\n") // 检查是否为零值
-		builder.WriteString(indent + fmt.Sprintf("\t%s = boolVal\n", fieldName))
+		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(boolVal)\n", fieldName, typeName))
 		builder.WriteString(indent + "}\n")
 	default:
 		builder.WriteString(indent + fmt.Sprintf("// 不支持的类型: %s\n", fieldType.Kind().String()))
@@ -1250,6 +1276,14 @@ func addZeroValueCheck(builder *strings.Builder, valName string, fieldType refle
 
 // isDefaultValueValid 检查默认值是否与字段类型匹配
 func isDefaultValueValid(defaultValue string, fieldType reflect.Type) bool {
+	for fieldType.Kind() == reflect.Ptr {
+		fieldType = fieldType.Elem()
+	}
+
+	if _, ok := getTextUnmarshalInfo(fieldType, ""); ok {
+		return true
+	}
+
 	switch fieldType.Kind() {
 	case reflect.String:
 		return true

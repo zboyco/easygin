@@ -250,25 +250,301 @@
             }
           },
           {
-            "description": "User Name",
+            "description": "标准 string",
             "in": "query",
-            "name": "name",
+            "name": "stdStr",
             "schema": {
               "type": "string"
             }
           },
           {
-            "description": "User Min Age",
+            "description": "标准 bool",
             "in": "query",
-            "name": "ageMin",
+            "name": "stdBool",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "标准 int",
+            "in": "query",
+            "name": "stdInt",
             "schema": {
               "type": "integer"
             }
           },
           {
-            "description": "Start Time",
+            "description": "标准 int64",
             "in": "query",
-            "name": "startTime",
+            "name": "stdInt64",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "标准 uint",
+            "in": "query",
+            "name": "stdUint",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "标准 uint64",
+            "in": "query",
+            "name": "stdUint64",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "标准 float32",
+            "in": "query",
+            "name": "stdFloat32",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "description": "标准 float64",
+            "in": "query",
+            "name": "stdFloat64",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "description": "标准 time.Time",
+            "in": "query",
+            "name": "stdTime",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "别名 string",
+            "in": "query",
+            "name": "aliasStr",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "别名 bool",
+            "in": "query",
+            "name": "aliasBool",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "别名 int",
+            "in": "query",
+            "name": "aliasInt",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "别名 uint64",
+            "in": "query",
+            "name": "aliasUint",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "别名 float64",
+            "in": "query",
+            "name": "aliasFloat",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "description": "别名 time.Time",
+            "in": "query",
+            "name": "aliasTime",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "自定义 string",
+            "in": "query",
+            "name": "customStr",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "自定义 bool",
+            "in": "query",
+            "name": "customBool",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "自定义 int",
+            "in": "query",
+            "name": "customInt",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "自定义 uint64",
+            "in": "query",
+            "name": "customUint",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "自定义 float64",
+            "in": "query",
+            "name": "customFloat",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "description": "自定义时间类型",
+            "in": "query",
+            "name": "customTime",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "指针 string",
+            "in": "query",
+            "name": "stdStrPtr",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "指针 bool",
+            "in": "query",
+            "name": "stdBoolPtr",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "指针 int",
+            "in": "query",
+            "name": "stdIntPtr",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "指针 int64",
+            "in": "query",
+            "name": "stdInt64Ptr",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "指针 uint64",
+            "in": "query",
+            "name": "stdUint64Ptr",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "指针 float64",
+            "in": "query",
+            "name": "stdFloat64Ptr",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "description": "指针 time.Time",
+            "in": "query",
+            "name": "stdTimePtr",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "指针别名 string",
+            "in": "query",
+            "name": "aliasStrPtr",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "指针别名 bool",
+            "in": "query",
+            "name": "aliasBoolPtr",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "指针别名 int",
+            "in": "query",
+            "name": "aliasIntPtr",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "指针别名 uint64",
+            "in": "query",
+            "name": "aliasUintPtr",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "指针别名 float64",
+            "in": "query",
+            "name": "aliasFloatPtr",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "description": "指针别名 time.Time",
+            "in": "query",
+            "name": "aliasTimePtr",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "指针自定义 int",
+            "in": "query",
+            "name": "customIntPtr",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "指针自定义 bool",
+            "in": "query",
+            "name": "customBoolPtr",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "指针自定义时间类型",
+            "in": "query",
+            "name": "customTimePtr",
             "schema": {
               "type": "string"
             }
