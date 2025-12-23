@@ -83,14 +83,14 @@ func GenerateParametersBindFunction(groups ...*RouterGroup) error {
 }
 
 // generateBindParametersMethod 生成BindParameters方法
-func generateBindParametersMethod(t reflect.Type, currentPkgPath string) string {
+func generateBindParametersMethod(t reflect.Type, currentPkgPath string, pkgAliases map[string]string) string {
 	var builder strings.Builder
 
 	// 写入方法签名
 	builder.WriteString(fmt.Sprintf("func (r *%s) EasyGinBindParameters(c *gin.Context) error {\n", t.Name()))
 
 	// 处理所有字段
-	processAllFields(&builder, t, "r", currentPkgPath)
+	processAllFields(&builder, t, "r", currentPkgPath, pkgAliases)
 
 	// 返回nil
 	builder.WriteString("\treturn nil\n")
@@ -100,7 +100,7 @@ func generateBindParametersMethod(t reflect.Type, currentPkgPath string) string 
 }
 
 // processAllFields 处理所有字段，包括嵌入字段
-func processAllFields(builder *strings.Builder, t reflect.Type, prefix string, currentPkgPath string) {
+func processAllFields(builder *strings.Builder, t reflect.Type, prefix string, currentPkgPath string, pkgAliases map[string]string) {
 	// 处理所有字段
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
@@ -116,11 +116,11 @@ func processAllFields(builder *strings.Builder, t reflect.Type, prefix string, c
 				// 检查是否有in:"body"标签
 				if inTag == "body" {
 					// 如果有in:"body"，调用generateBodyBinding处理
-					generateBodyBinding(builder, fmt.Sprintf("%s.%s", prefix, field.Name), field, currentPkgPath)
-				} else {
-					// 递归处理嵌入字段
-					processAllFields(builder, embedType, prefix, currentPkgPath)
-				}
+						generateBodyBinding(builder, fmt.Sprintf("%s.%s", prefix, field.Name), field, currentPkgPath, pkgAliases)
+					} else {
+						// 递归处理嵌入字段
+						processAllFields(builder, embedType, prefix, currentPkgPath, pkgAliases)
+					}
 			} else {
 				// 如果是普通类型字段，按照普通字段逻辑处理
 				name := field.Tag.Get("name")
@@ -133,13 +133,13 @@ func processAllFields(builder *strings.Builder, t reflect.Type, prefix string, c
 				// 根据in标签类型生成解析代码
 					switch inTag {
 					case "path":
-						generatePathBinding(builder, fieldName, name, field, currentPkgPath)
+						generatePathBinding(builder, fieldName, name, field, currentPkgPath, pkgAliases)
 					case "query":
-						generateQueryBinding(builder, fieldName, name, field, currentPkgPath)
+						generateQueryBinding(builder, fieldName, name, field, currentPkgPath, pkgAliases)
 					case "header":
-						generateHeaderBinding(builder, fieldName, name, field, currentPkgPath)
+						generateHeaderBinding(builder, fieldName, name, field, currentPkgPath, pkgAliases)
 					case "body":
-						generateBodyBinding(builder, fieldName, field, currentPkgPath)
+						generateBodyBinding(builder, fieldName, field, currentPkgPath, pkgAliases)
 					}
 				}
 				continue
@@ -163,19 +163,19 @@ func processAllFields(builder *strings.Builder, t reflect.Type, prefix string, c
 		// 根据in标签类型生成解析代码
 		switch inTag {
 		case "path":
-			generatePathBinding(builder, fieldName, name, field, currentPkgPath)
+			generatePathBinding(builder, fieldName, name, field, currentPkgPath, pkgAliases)
 		case "query":
-			generateQueryBinding(builder, fieldName, name, field, currentPkgPath)
+			generateQueryBinding(builder, fieldName, name, field, currentPkgPath, pkgAliases)
 		case "header":
-			generateHeaderBinding(builder, fieldName, name, field, currentPkgPath)
+			generateHeaderBinding(builder, fieldName, name, field, currentPkgPath, pkgAliases)
 		case "body":
-			generateBodyBinding(builder, fieldName, field, currentPkgPath)
+			generateBodyBinding(builder, fieldName, field, currentPkgPath, pkgAliases)
 		}
 	}
 }
 
 // generatePathBinding 生成路径参数绑定代码
-func generatePathBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string) {
+func generatePathBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string, pkgAliases map[string]string) {
 	builder.WriteString(fmt.Sprintf("\t// 绑定路径参数 %s\n", paramName))
 	builder.WriteString("\t{\n") // 添加代码块开始
 	builder.WriteString(fmt.Sprintf("\t\tpathVal := c.Param(\"%s\")\n", paramName))
@@ -214,16 +214,16 @@ func generatePathBinding(builder *strings.Builder, fieldName, paramName string, 
 
 	builder.WriteString("\t\tif pathVal != \"\" {\n")
 	if field.Type.Name() != "" {
-		generateTypeConversion(builder, fieldName, "pathVal", paramName, field.Type, "\t\t\t", currentPkgPath)
+		generateTypeConversion(builder, fieldName, "pathVal", paramName, field.Type, "\t\t\t", currentPkgPath, pkgAliases)
 	} else {
-		generateValueConversion(builder, fieldName, "pathVal", paramName, "\t\t\t", field.Type, currentPkgPath)
+		generateValueConversion(builder, fieldName, "pathVal", paramName, "\t\t\t", field.Type, currentPkgPath, pkgAliases)
 	}
 	builder.WriteString("\t\t}\n")
 	builder.WriteString("\t}\n") // 添加代码块结束
 }
 
 // generateQueryBinding 生成查询参数绑定代码
-func generateQueryBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string) {
+func generateQueryBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string, pkgAliases map[string]string) {
 	builder.WriteString(fmt.Sprintf("\t// 绑定查询参数 %s\n", paramName))
 	builder.WriteString("\t{\n") // 添加代码块开始
 	fieldType := field.Type
@@ -278,10 +278,10 @@ func generateQueryBinding(builder *strings.Builder, fieldName, paramName string,
 
 	builder.WriteString("\t\tif queryVal != \"\" {\n")
 	if field.Type.Name() != "" {
-		generateTypeConversion(builder, fieldName, "queryVal", paramName, field.Type, "\t\t\t", currentPkgPath)
-	} else {
-		generateValueConversion(builder, fieldName, "queryVal", paramName, "\t\t\t", field.Type, currentPkgPath)
-	}
+			generateTypeConversion(builder, fieldName, "queryVal", paramName, field.Type, "\t\t\t", currentPkgPath, pkgAliases)
+		} else {
+			generateValueConversion(builder, fieldName, "queryVal", paramName, "\t\t\t", field.Type, currentPkgPath, pkgAliases)
+		}
 	builder.WriteString("\t\t}\n")
 	builder.WriteString("\t}\n")
 }
@@ -433,7 +433,7 @@ func isFloatKind(kind reflect.Kind) bool {
 }
 
 // generateHeaderBinding 生成头部参数绑定代码
-func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string) {
+func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string, pkgAliases map[string]string) {
 	builder.WriteString(fmt.Sprintf("\t// 绑定头部参数 %s\n", paramName))
 	builder.WriteString("\t{\n") // 添加代码块开始
 	builder.WriteString(fmt.Sprintf("\t\theaderVal := c.GetHeader(\"%s\")\n", paramName))
@@ -471,16 +471,16 @@ func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string
 
 	builder.WriteString("\t\tif headerVal != \"\" {\n")
 	if field.Type.Name() != "" {
-		generateTypeConversion(builder, fieldName, "headerVal", paramName, field.Type, "\t\t\t", currentPkgPath)
+		generateTypeConversion(builder, fieldName, "headerVal", paramName, field.Type, "\t\t\t", currentPkgPath, pkgAliases)
 	} else {
-		generateValueConversion(builder, fieldName, "headerVal", paramName, "\t\t\t", field.Type, currentPkgPath)
+		generateValueConversion(builder, fieldName, "headerVal", paramName, "\t\t\t", field.Type, currentPkgPath, pkgAliases)
 	}
 	builder.WriteString("\t\t}\n")
 	builder.WriteString("\t}\n")
 }
 
 // generateBodyBinding 生成请求体绑定代码
-func generateBodyBinding(builder *strings.Builder, fieldName string, field reflect.StructField, currentPkgPath string) {
+func generateBodyBinding(builder *strings.Builder, fieldName string, field reflect.StructField, currentPkgPath string, pkgAliases map[string]string) {
 	mime := field.Tag.Get("mime")
 
 	// 检查字段类型是否为指针，如果是则添加实例化代码
@@ -517,7 +517,7 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 			// 如果是外部包的类型，需要加上包名
 			if elemType.PkgPath() != currentPkgPath && !isBuiltinType(elemType) {
 				// 获取包名（最后一个斜杠后的部分）
-				pkgName := filepath.Base(elemType.PkgPath())
+				pkgName := resolveImportAlias(elemType.PkgPath(), pkgAliases)
 
 				// 使用完整的包名.类型名
 				typeName = pkgName + "." + typeName
@@ -528,7 +528,7 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 
 				// 创建一个临时的imports映射，用于收集外部包
 				tempImports := make(map[string]bool)
-				collectExternalPackages(tempMethod, elemType, tempImports)
+				collectExternalPackages(tempMethod, elemType, tempImports, pkgAliases)
 			}
 
 			builder.WriteString(fmt.Sprintf("\t// 实例化 %s\n", strings.TrimPrefix(fieldName, "r.")))
@@ -559,7 +559,7 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 			name = strings.Split(name, ",")[0]
 
 			// 使用 generateFormBinding 处理表单字段
-			generateFormBinding(builder, fmt.Sprintf("%s.%s", fieldName, subField.Name), name, subField, currentPkgPath)
+			generateFormBinding(builder, fmt.Sprintf("%s.%s", fieldName, subField.Name), name, subField, currentPkgPath, pkgAliases)
 		}
 	} else {
 		builder.WriteString("\t{\n") // 添加代码块开始
@@ -591,7 +591,7 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 	}
 }
 
-func generateFormBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string) {
+func generateFormBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string, pkgAliases map[string]string) {
 	builder.WriteString(fmt.Sprintf("\t// 绑定表单参数 %s\n", paramName))
 	builder.WriteString("\t{\n") // 添加代码块开始
 
@@ -676,9 +676,9 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 
 		builder.WriteString("\t\tif formVal != \"\" {\n")
 		if field.Type.Name() != "" {
-			generateTypeConversion(builder, fieldName, "formVal", paramName, field.Type, "\t\t\t", currentPkgPath)
+			generateTypeConversion(builder, fieldName, "formVal", paramName, field.Type, "\t\t\t", currentPkgPath, pkgAliases)
 		} else {
-			generateValueConversion(builder, fieldName, "formVal", paramName, "\t\t\t", field.Type, currentPkgPath)
+			generateValueConversion(builder, fieldName, "formVal", paramName, "\t\t\t", field.Type, currentPkgPath, pkgAliases)
 		}
 		builder.WriteString("\t\t}\n")
 	}
@@ -686,7 +686,7 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 }
 
 // 生成包含包名前缀的类型名称
-func getTypeNameWithPkg(fieldType reflect.Type, currentPkgPath string) string {
+func getTypeNameWithPkg(fieldType reflect.Type, currentPkgPath string, pkgAliases map[string]string) string {
 	for fieldType.Kind() == reflect.Ptr {
 		fieldType = fieldType.Elem()
 	}
@@ -696,18 +696,27 @@ func getTypeNameWithPkg(fieldType reflect.Type, currentPkgPath string) string {
 	}
 
 	if pkgPath := fieldType.PkgPath(); pkgPath != "" && pkgPath != currentPkgPath {
-		return filepath.Base(pkgPath) + "." + fieldType.Name()
+		return resolveImportAlias(pkgPath, pkgAliases) + "." + fieldType.Name()
 	}
 
 	return fieldType.Name()
 }
 
+func resolveImportAlias(pkgPath string, pkgAliases map[string]string) string {
+	if pkgAliases != nil {
+		if alias, ok := pkgAliases[pkgPath]; ok && alias != "" {
+			return alias
+		}
+	}
+	return filepath.Base(pkgPath)
+}
+
 // generateValueConversion 生成值转换代码
-func generateValueConversion(builder *strings.Builder, fieldName, valName, paramName, indent string, fieldType reflect.Type, currentPkgPath string) {
+func generateValueConversion(builder *strings.Builder, fieldName, valName, paramName, indent string, fieldType reflect.Type, currentPkgPath string, pkgAliases map[string]string) {
 	// 处理指针类型
 	if fieldType.Kind() == reflect.Ptr {
 		// 优先处理实现了 TextUnmarshal 的指针类型，避免生成二次指针赋值
-		if info, ok := getTextUnmarshalInfo(fieldType, currentPkgPath); ok {
+		if info, ok := getTextUnmarshalInfo(fieldType, currentPkgPath, pkgAliases); ok {
 			builder.WriteString(fmt.Sprintf("%stmpVal := new(%s)\n", indent, info.typeName))
 			builder.WriteString(fmt.Sprintf("%sif err := tmpVal.UnmarshalText([]byte(%s)); err != nil {\n", indent, valName))
 			builder.WriteString(fmt.Sprintf("%s\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", indent, paramName))
@@ -716,20 +725,20 @@ func generateValueConversion(builder *strings.Builder, fieldName, valName, param
 			return
 		}
 
-		typeName := getTypeNameWithPkg(fieldType.Elem(), currentPkgPath)
+		typeName := getTypeNameWithPkg(fieldType.Elem(), currentPkgPath, pkgAliases)
 		builder.WriteString(fmt.Sprintf("%stmpVal := new(%s)\n", indent, typeName))
-		generateValueConversionForType(builder, "*tmpVal", valName, paramName, fieldType.Elem(), indent, currentPkgPath)
+		generateValueConversionForType(builder, "*tmpVal", valName, paramName, fieldType.Elem(), indent, currentPkgPath, pkgAliases)
 		builder.WriteString(fmt.Sprintf("%s%s = tmpVal\n", indent, fieldName))
 		return
 	}
 
 	// 处理非指针类型
-	generateValueConversionForType(builder, fieldName, valName, paramName, fieldType, indent, currentPkgPath)
+	generateValueConversionForType(builder, fieldName, valName, paramName, fieldType, indent, currentPkgPath, pkgAliases)
 }
 
 // generateValueConversionForType 根据类型生成值转换代码
-func generateValueConversionForType(builder *strings.Builder, fieldName, valName, paramName string, fieldType reflect.Type, indent string, currentPkgPath string) {
-	if info, ok := getTextUnmarshalInfo(fieldType, currentPkgPath); ok {
+func generateValueConversionForType(builder *strings.Builder, fieldName, valName, paramName string, fieldType reflect.Type, indent string, currentPkgPath string, pkgAliases map[string]string) {
+	if info, ok := getTextUnmarshalInfo(fieldType, currentPkgPath, pkgAliases); ok {
 		generateTextUnmarshalConversion(builder, fieldName, valName, paramName, info, indent)
 		return
 	}
@@ -746,7 +755,7 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 		return
 	}
 
-	typeName := getTypeNameWithPkg(fieldType, currentPkgPath)
+	typeName := getTypeNameWithPkg(fieldType, currentPkgPath, pkgAliases)
 
 	// 处理基本类型
 	switch fieldType.Kind() {
@@ -799,7 +808,7 @@ type textUnmarshalInfo struct {
 	usePointerReceiver bool
 }
 
-func getTextUnmarshalInfo(fieldType reflect.Type, currentPkgPath string) (textUnmarshalInfo, bool) {
+func getTextUnmarshalInfo(fieldType reflect.Type, currentPkgPath string, pkgAliases map[string]string) (textUnmarshalInfo, bool) {
 	if fieldType == nil {
 		return textUnmarshalInfo{}, false
 	}
@@ -814,7 +823,7 @@ func getTextUnmarshalInfo(fieldType reflect.Type, currentPkgPath string) (textUn
 
 	typeName := fieldType.Name()
 	if pkgPath := fieldType.PkgPath(); pkgPath != "" && pkgPath != currentPkgPath {
-		typeName = filepath.Base(pkgPath) + "." + typeName
+		typeName = resolveImportAlias(pkgPath, pkgAliases) + "." + typeName
 	}
 
 	if fieldType.Implements(bindTextUnmarshalerType) {
@@ -935,13 +944,14 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 		}
 	}
 
-	// 为每个唯一的API生成Parse方法并检查使用的包
-	var parseMethods strings.Builder
+	// 构建稳定的类型顺序
 	typeKeys := make([]string, 0, len(uniqueAPIs))
 	for key := range uniqueAPIs {
 		typeKeys = append(typeKeys, key)
 	}
 	sort.Strings(typeKeys)
+
+	// 第一遍：收集外部类型包并统计基础包使用（使用默认包名）
 	for _, key := range typeKeys {
 		api := uniqueAPIs[key]
 		apiType := reflect.TypeOf(api)
@@ -949,43 +959,44 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 			apiType = apiType.Elem()
 		}
 
-		// 生成Parse方法
-		method := generateBindParametersMethod(apiType, pkgPath)
+		method := generateBindParametersMethod(apiType, pkgPath, nil)
+		markUsedImports(method, usedImports)
+		methodForCollect := method
+		if strings.Contains(methodForCollect, "easygin.") {
+			methodForCollect = strings.ReplaceAll(methodForCollect, "easygin.", "")
+		}
+		collectExternalPackages(methodForCollect, apiType, externalTypeImports, nil)
+	}
+
+	// 基础包不参与外部包别名，避免重复或无意义别名
+	for pkg := range externalTypeImports {
+		if _, ok := usedImports[pkg]; ok {
+			usedImports[pkg] = true
+			delete(externalTypeImports, pkg)
+		}
+	}
+
+	// 生成外部包别名（避免冲突）
+	reservedNames := make(map[string]bool)
+	for pkg, used := range usedImports {
+		if used {
+			reservedNames[filepath.Base(pkg)] = true
+		}
+	}
+	pkgAliases := buildImportAliases(externalTypeImports, reservedNames)
+
+	// 第二遍：生成Parse方法
+	var parseMethods strings.Builder
+	for _, key := range typeKeys {
+		api := uniqueAPIs[key]
+		apiType := reflect.TypeOf(api)
+		if apiType.Kind() == reflect.Ptr {
+			apiType = apiType.Elem()
+		}
+
+		method := generateBindParametersMethod(apiType, pkgPath, pkgAliases)
 		parseMethods.WriteString(method)
 		parseMethods.WriteString("\n\n")
-
-		// 检查使用的包
-		if strings.Contains(method, "errors.") {
-			usedImports["errors"] = true
-		}
-		if strings.Contains(method, "fmt.") {
-			usedImports["fmt"] = true
-		}
-		if strings.Contains(method, "json.") {
-			usedImports["encoding/json"] = true
-		}
-		if strings.Contains(method, "strconv.") {
-			usedImports["strconv"] = true
-		}
-		if strings.Contains(method, "time.") {
-			usedImports["time"] = true
-		}
-		if strings.Contains(method, "strings.") {
-			usedImports["strings"] = true
-		}
-		if strings.Contains(method, "reflect.") {
-			usedImports["reflect"] = true
-		}
-		if strings.Contains(method, "easygin.") {
-			usedImports["github.com/zboyco/easygin"] = true
-			method = strings.ReplaceAll(method, "easygin.", "")
-		}
-		if strings.Contains(method, "gin.") {
-			usedImports["github.com/gin-gonic/gin"] = true
-		}
-
-		// 检查外部包的使用
-		collectExternalPackages(method, apiType, externalTypeImports)
 	}
 
 	// 写入导入
@@ -1012,7 +1023,11 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 			if usedImports[pkg] { // 已经在基础导入列表中启用的包避免重复导入
 				continue
 			}
-			builder.WriteString(fmt.Sprintf("\t\"%s\"\n", pkg))
+			if alias, ok := pkgAliases[pkg]; ok && alias != "" && alias != filepath.Base(pkg) {
+				builder.WriteString(fmt.Sprintf("\t%s \"%s\"\n", alias, pkg))
+			} else {
+				builder.WriteString(fmt.Sprintf("\t\"%s\"\n", pkg))
+			}
 		}
 	}
 
@@ -1022,6 +1037,75 @@ func generateFileContent(pkgPath string, apis []RouterHandler) string {
 	builder.WriteString(parseMethods.String())
 
 	return builder.String()
+}
+
+func markUsedImports(method string, usedImports map[string]bool) {
+	if strings.Contains(method, "errors.") {
+		usedImports["errors"] = true
+	}
+	if strings.Contains(method, "fmt.") {
+		usedImports["fmt"] = true
+	}
+	if strings.Contains(method, "json.") {
+		usedImports["encoding/json"] = true
+	}
+	if strings.Contains(method, "strconv.") {
+		usedImports["strconv"] = true
+	}
+	if strings.Contains(method, "time.") {
+		usedImports["time"] = true
+	}
+	if strings.Contains(method, "strings.") {
+		usedImports["strings"] = true
+	}
+	if strings.Contains(method, "reflect.") {
+		usedImports["reflect"] = true
+	}
+	if strings.Contains(method, "easygin.") {
+		usedImports["github.com/zboyco/easygin"] = true
+	}
+	if strings.Contains(method, "gin.") {
+		usedImports["github.com/gin-gonic/gin"] = true
+	}
+}
+
+func buildImportAliases(externalTypeImports map[string]bool, reservedNames map[string]bool) map[string]string {
+	if len(externalTypeImports) == 0 {
+		return nil
+	}
+
+	externalPkgs := make([]string, 0, len(externalTypeImports))
+	for pkg := range externalTypeImports {
+		externalPkgs = append(externalPkgs, pkg)
+	}
+	sort.Strings(externalPkgs)
+
+	aliases := make(map[string]string, len(externalPkgs))
+	usedNames := make(map[string]bool, len(reservedNames)+len(externalPkgs))
+	for name := range reservedNames {
+		usedNames[name] = true
+	}
+
+	for _, pkgPath := range externalPkgs {
+		base := filepath.Base(pkgPath)
+		alias := base
+		if usedNames[alias] {
+			alias = nextImportAlias(base, usedNames)
+		}
+		usedNames[alias] = true
+		aliases[pkgPath] = alias
+	}
+
+	return aliases
+}
+
+func nextImportAlias(base string, usedNames map[string]bool) string {
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s%d", base, i)
+		if !usedNames[candidate] {
+			return candidate
+		}
+	}
 }
 
 // generateFileForPackage 为指定包生成文件
@@ -1184,7 +1268,7 @@ func parseModulePath(goModPath string) (string, error) {
 }
 
 // generateTypeConversion 生成类型转换代码
-func generateTypeConversion(builder *strings.Builder, fieldName, valName, paramName string, fieldType reflect.Type, indent string, currentPkgPath string) {
+func generateTypeConversion(builder *strings.Builder, fieldName, valName, paramName string, fieldType reflect.Type, indent string, currentPkgPath string, pkgAliases map[string]string) {
 	// 获取底层类型
 	underlyingKind := fieldType.Kind()
 
@@ -1192,11 +1276,11 @@ func generateTypeConversion(builder *strings.Builder, fieldName, valName, paramN
 	typeName := fieldType.Name()
 	if fieldType.PkgPath() != "" && fieldType.PkgPath() != currentPkgPath {
 		// 使用完整的包路径.类型名
-		pkgName := filepath.Base(fieldType.PkgPath())
+		pkgName := resolveImportAlias(fieldType.PkgPath(), pkgAliases)
 		typeName = pkgName + "." + typeName
 	}
 
-	if info, ok := getTextUnmarshalInfo(fieldType, currentPkgPath); ok {
+	if info, ok := getTextUnmarshalInfo(fieldType, currentPkgPath, pkgAliases); ok {
 		generateTextUnmarshalConversion(builder, fieldName, valName, paramName, info, indent)
 		return
 	}
@@ -1232,7 +1316,7 @@ func generateTypeConversion(builder *strings.Builder, fieldName, valName, paramN
 		builder.WriteString(indent + fmt.Sprintf("%s = %s(boolVal)\n", fieldName, typeName))
 	default:
 		// 对于其他类型，使用通用的转换方法
-		generateValueConversionForType(builder, fieldName, valName, paramName, fieldType, indent, currentPkgPath)
+		generateValueConversionForType(builder, fieldName, valName, paramName, fieldType, indent, currentPkgPath, pkgAliases)
 	}
 }
 
@@ -1280,7 +1364,7 @@ func isDefaultValueValid(defaultValue string, fieldType reflect.Type) bool {
 		fieldType = fieldType.Elem()
 	}
 
-	if _, ok := getTextUnmarshalInfo(fieldType, ""); ok {
+	if _, ok := getTextUnmarshalInfo(fieldType, "", nil); ok {
 		return true
 	}
 
@@ -1309,7 +1393,7 @@ func isDefaultValueValid(defaultValue string, fieldType reflect.Type) bool {
 }
 
 // collectExternalPackages 收集结构体中所有字段的外部包
-func collectExternalPackages(method string, t reflect.Type, imports map[string]bool) {
+func collectExternalPackages(method string, t reflect.Type, imports map[string]bool, pkgAliases map[string]string) {
 	if t == nil {
 		fmt.Println("Warning: nil type passed to collectExternalPackages")
 		return
@@ -1331,7 +1415,7 @@ func collectExternalPackages(method string, t reflect.Type, imports map[string]b
 				embedType = embedType.Elem()
 			}
 			if embedType.Kind() == reflect.Struct {
-				collectExternalPackages(method, embedType, imports)
+				collectExternalPackages(method, embedType, imports, pkgAliases)
 			}
 			continue
 		}
@@ -1344,7 +1428,7 @@ func collectExternalPackages(method string, t reflect.Type, imports map[string]b
 
 		// 如果是外部包的类型，添加到imports
 		if fieldType.PkgPath() != "" && fieldType.PkgPath() != t.PkgPath() {
-			pkgName := filepath.Base(fieldType.PkgPath())
+			pkgName := resolveImportAlias(fieldType.PkgPath(), pkgAliases)
 			typeName := pkgName + "." + fieldType.Name()
 
 			// 检查方法中是否包含该类型的引用
@@ -1355,7 +1439,7 @@ func collectExternalPackages(method string, t reflect.Type, imports map[string]b
 
 		// 如果是结构体，递归检查
 		if fieldType.Kind() == reflect.Struct {
-			collectExternalPackages(method, fieldType, imports)
+			collectExternalPackages(method, fieldType, imports, pkgAliases)
 		}
 	}
 }

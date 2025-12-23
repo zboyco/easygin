@@ -7,6 +7,8 @@ import (
 
 	"github.com/zboyco/easygin"
 	"github.com/zboyco/easygin/example/types"
+	one "github.com/zboyco/easygin/example/types/one/datatypes"
+	two "github.com/zboyco/easygin/example/types/two/datatypes"
 	"github.com/zboyco/easygin/logr"
 )
 
@@ -53,6 +55,11 @@ type ListUser struct {
 	PtrCustomInt      *types.CustomInt    `in:"query" name:"customIntPtr,omitempty" default:"70" desc:"指针自定义 int"`
 	PtrCustomBool     *types.CustomBool   `in:"query" name:"customBoolPtr,omitempty" default:"false" desc:"指针自定义 bool"`
 	PtrCustomTime     *types.CustomTime   `in:"query" name:"customTimePtr,omitempty" default:"2024-06-01T00:00:00Z" desc:"指针自定义时间类型"`
+
+	SameType1    one.SameType  `in:"query" name:"sameType" desc:"相同类型"`
+	SameType2    two.SameType  `in:"query" name:"sameType" desc:"相同类型"`
+	PtrSameType1 *one.SameType `in:"query" name:"sameTypePtr" desc:"相同类型"`
+	PtrSameType2 *two.SameType `in:"query" name:"sameTypePtr" desc:"相同类型"`
 }
 
 func (ListUser) Path() string {

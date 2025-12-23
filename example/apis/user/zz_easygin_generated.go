@@ -15,6 +15,8 @@ import (
 	"github.com/zboyco/easygin"
 
 	"github.com/zboyco/easygin/example/types"
+	"github.com/zboyco/easygin/example/types/one/datatypes"
+	datatypes2 "github.com/zboyco/easygin/example/types/two/datatypes"
 )
 
 func (r *CreateUser) EasyGinBindParameters(c *gin.Context) error {
@@ -754,6 +756,82 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 				return fmt.Errorf("invalid parameter 'customTimePtr': %v", err.Error())
 			}
 			r.PtrCustomTime = tmpVal
+		}
+	}
+	// 绑定查询参数 sameType
+	{
+		queryVal := c.Query("sameType")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			return errors.New("missing required parameter 'sameType' in query")
+		}
+		if queryVal != "" {
+			intVal, err := strconv.ParseInt(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'sameType': %v", err.Error())
+			}
+			r.SameType1 = datatypes.SameType(intVal)
+		}
+	}
+	// 绑定查询参数 sameType
+	{
+		queryVal := c.Query("sameType")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			return errors.New("missing required parameter 'sameType' in query")
+		}
+		if queryVal != "" {
+			intVal, err := strconv.ParseInt(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'sameType': %v", err.Error())
+			}
+			r.SameType2 = datatypes2.SameType(intVal)
+		}
+	}
+	// 绑定查询参数 sameTypePtr
+	{
+		queryVal := c.Query("sameTypePtr")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			return errors.New("missing required parameter 'sameTypePtr' in query")
+		}
+		if queryVal != "" {
+			tmpVal := new(datatypes.SameType)
+			intVal, err := strconv.ParseInt(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'sameTypePtr': %v", err.Error())
+			}
+			if intVal != 0 {
+				*tmpVal = datatypes.SameType(intVal)
+			}
+			r.PtrSameType1 = tmpVal
+		}
+	}
+	// 绑定查询参数 sameTypePtr
+	{
+		queryVal := c.Query("sameTypePtr")
+		if queryVal == "0" {
+			queryVal = ""
+		}
+		if queryVal == "" {
+			return errors.New("missing required parameter 'sameTypePtr' in query")
+		}
+		if queryVal != "" {
+			tmpVal := new(datatypes2.SameType)
+			intVal, err := strconv.ParseInt(queryVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid parameter 'sameTypePtr': %v", err.Error())
+			}
+			if intVal != 0 {
+				*tmpVal = datatypes2.SameType(intVal)
+			}
+			r.PtrSameType2 = tmpVal
 		}
 	}
 	return nil

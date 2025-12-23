@@ -26,6 +26,7 @@
 - 参数: 
   - `t reflect.Type` - 结构体类型
   - `currentPkgPath string` - 当前包路径
+  - `pkgAliases map[string]string` - 外部包别名表
 - 返回: `string` - 生成的方法代码
 - 通过 `processAllFields` 统一驱动字段解析，嵌入字段会根据标签自动分派到对应的绑定逻辑
 
@@ -36,24 +37,25 @@
   - `t reflect.Type` - 结构体类型
   - `prefix string` - 字段前缀
   - `currentPkgPath string` - 当前包路径
+  - `pkgAliases map[string]string` - 外部包别名表
 - 规则:
   - 匿名嵌入 struct 且 `in:"body"` 时直接走 `generateBodyBinding`
   - 匿名嵌入 struct 且无 `in` 标签则递归展开子字段
   - 匿名嵌入为非 struct 且带 `in` 标签时按普通字段处理
 
 ### 4. 参数绑定生成函数
-- `generatePathBinding`: 生成路径参数绑定代码，签名包含 `currentPkgPath`，用于跨包类型名补全
-- `generateQueryBinding`: 生成查询参数绑定代码；签名包含 `currentPkgPath`，支持识别 `[]T`、`*[]T` 以及 `[]*T` 字段，先判断是否允许为空 (`omitempty`)，再调用切片专用逻辑或回退到单值解析，并对默认值、必填校验等保持一致处理，同时配合 `addZeroValueCheck` 将 `"0"`、`"false"`、零时间等视为未填以便必填校验和默认值覆盖
+- `generatePathBinding`: 生成路径参数绑定代码，签名包含 `currentPkgPath` 与 `pkgAliases`，用于跨包类型名补全
+- `generateQueryBinding`: 生成查询参数绑定代码；签名包含 `currentPkgPath` 与 `pkgAliases`，支持识别 `[]T`、`*[]T` 以及 `[]*T` 字段，先判断是否允许为空 (`omitempty`)，再调用切片专用逻辑或回退到单值解析，并对默认值、必填校验等保持一致处理，同时配合 `addZeroValueCheck` 将 `"0"`、`"false"`、零时间等视为未填以便必填校验和默认值覆盖
 - `generateQuerySliceBinding`: 查询参数切片绑定逻辑，使用 `c.QueryArray()` 捕获同名参数数组，针对 string、bool、各类有符号/无符号整数和浮点类型（及其指针）依次转换并回写字段，不支持的类型会直接返回错误
-- `generateHeaderBinding`: 生成头部参数绑定代码，签名包含 `currentPkgPath`
-- `generateBodyBinding`: 生成请求体绑定代码
+- `generateHeaderBinding`: 生成头部参数绑定代码，签名包含 `currentPkgPath` 与 `pkgAliases`
+- `generateBodyBinding`: 生成请求体绑定代码，签名包含 `currentPkgPath` 与 `pkgAliases`
   - 支持指针类型字段的实例化
   - 针对匿名结构体指针，使用格式化的多行定义提高可读性
   - 针对命名结构体指针，使用标准实例化方式
   - 为跨包命名结构体指针预先触发 `collectExternalPackages` 收集导入，避免生成代码缺失依赖
   - `mime:"multipart"` 分支调用 `ParseMultipartForm` 后遍历子字段，复用 `generateFormBinding` 生成表单/文件绑定
   - JSON 分支通过 `ValidateJsonRequiredFields`（受 `easygin.HandleBodyJsonOmitEmptyAndDefault()` 开关控制）做必填与默认值校验
-- `generateFormBinding`: 生成表单参数绑定代码，签名包含 `currentPkgPath`
+- `generateFormBinding`: 生成表单参数绑定代码，签名包含 `currentPkgPath` 与 `pkgAliases`
   - 支持单文件上传 (`*multipart.FileHeader`)
   - 支持多文件上传 (`[]*multipart.FileHeader`)
   - 支持字符串数组 (`[]string`)
@@ -62,17 +64,20 @@
   - 按 `name` 标签的 `omitempty`/`default` 控制必填与默认值，自动应用零值检查与类型转换
 
 ### 5. 类型转换函数
-- `generateValueConversion`: 生成值转换代码，签名包含 `currentPkgPath`
+- `generateValueConversion`: 生成值转换代码，签名包含 `currentPkgPath` 与 `pkgAliases`
 - `generateValueConversionForType`: 根据类型生成值转换代码，优先检测实现 `encoding.TextUnmarshaler` 的类型（含指针接收者），跨包类型自动补充包前缀，并避免生成二级指针赋值
 - `generateTypeConversion`: 生成类型转换代码，支持 `TextUnmarshaler` 优先解析并在跨包场景使用 `pkg.Type`，同时触发外部包收集
 - `addZeroValueCheck`: 添加零值检查代码
-- `getTypeNameWithPkg`/`getTextUnmarshalInfo`: 处理跨包类型名和 TextUnmarshal 接收者，保证生成代码可编译
+- `getTypeNameWithPkg`/`getTextUnmarshalInfo`: 处理跨包类型名和 TextUnmarshal 接收者，结合别名表保证生成代码可编译
 
 ### 6. 辅助函数
 - `processRouterGroup`: 处理路由组中的所有API
-- `generateFileContent`: 生成文件内容，去重同类型 API，排序包名保证生成结果稳定，并按实际用量、外部类型收集导入
+- `generateFileContent`: 生成文件内容，去重同类型 API，排序包名保证生成结果稳定；分两遍生成，先统计基础包用量并收集外部类型包，再生成别名表并输出最终方法与导入
 - `generateFileForPackage`: 为指定包生成文件，运行时/模块目录/go build 多策略定位包路径并确保目录存在后写入
-- `collectExternalPackages`: 收集结构体中所有字段的外部包
+- `collectExternalPackages`: 收集结构体中所有字段的外部包，使用别名表匹配类型引用
+- `resolveImportAlias`: 根据包路径获取别名（无别名时取包名）
+- `buildImportAliases`: 构建外部包别名表，避免与已使用包名冲突
+- `markUsedImports`: 扫描生成的方法代码，统计基础包的实际使用情况
 - `isBuiltinType`: 判断是否是内置类型
 - `isDefaultValueValid`: 检查默认值是否与字段类型匹配
 - `assignSliceValue`: 将切片解析结果写回字段，兼容切片指针与普通切片
@@ -98,15 +103,17 @@
 11. 支持字符串数组和字符串数组指针类型的表单参数处理
 12. 支持查询参数切片的自动绑定，包含切片指针和指针元素
 13. 零值输入（如 `"0"`, `"false"`, 零时间）会在必填校验前归一为空字符串，避免误判
-14. 同一 API 类型仅生成一次绑定方法，确保导入与生成文件可重复、可复现
+14. 同名不同路径的外部包会自动生成别名，基础包仅在实际使用时导入且不参与外部包别名
+15. 同一 API 类型仅生成一次绑定方法，确保导入与生成文件可重复、可复现
 
 ## 代码生成流程
 1. 收集所有API并按包分组
 2. 为每个包生成单独的文件
 3. 分析每个API的结构体类型
-4. 生成参数绑定方法
-5. 处理导入包依赖
-6. 写入生成的代码到文件
+4. 第一遍生成方法用于统计基础包用量并收集外部类型包
+5. 生成外部包别名表并过滤基础包
+6. 第二遍生成参数绑定方法
+7. 输出导入包（基础包+外部包别名）并写入生成代码
 
 ## 文件生成位置
 - 文件名: `zz_easygin_generated.go`

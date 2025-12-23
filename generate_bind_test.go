@@ -47,7 +47,7 @@ func TestGeneratePathBindingRequired(t *testing.T) {
 	field := reflect.TypeOf(pathStruct{}).Field(0)
 
 	var builder strings.Builder
-	generatePathBinding(&builder, "r.ID", "item_id", field, reflect.TypeOf(pathStruct{}).PkgPath())
+	generatePathBinding(&builder, "r.ID", "item_id", field, reflect.TypeOf(pathStruct{}).PkgPath(), nil)
 	output := builder.String()
 
 	if !strings.Contains(output, `return errors.New("missing required parameter 'item_id' in path")`) {
@@ -65,7 +65,7 @@ func TestGenerateQueryBindingOptionalDefault(t *testing.T) {
 	field := reflect.TypeOf(queryStruct{}).Field(0)
 
 	var builder strings.Builder
-	generateQueryBinding(&builder, "r.Name", "name", field, reflect.TypeOf(queryStruct{}).PkgPath())
+	generateQueryBinding(&builder, "r.Name", "name", field, reflect.TypeOf(queryStruct{}).PkgPath(), nil)
 	output := builder.String()
 
 	if !strings.Contains(output, `queryVal = "anonymous"`) {
@@ -106,7 +106,7 @@ func TestGenerateBodyBindingJSONPointer(t *testing.T) {
 	field := reflect.TypeOf(bodyStruct{}).Field(0)
 
 	var builder strings.Builder
-	generateBodyBinding(&builder, "r.Payload", field, reflect.TypeOf(bodyStruct{}).PkgPath())
+	generateBodyBinding(&builder, "r.Payload", field, reflect.TypeOf(bodyStruct{}).PkgPath(), nil)
 	output := builder.String()
 
 	if !strings.Contains(output, "if r.Payload == nil") {
@@ -130,7 +130,7 @@ func TestGenerateBodyBindingMultipartForm(t *testing.T) {
 	field := reflect.TypeOf(multipartForm{}).Field(0)
 
 	var builder strings.Builder
-	generateBodyBinding(&builder, "r.Form", field, reflect.TypeOf(multipartForm{}).PkgPath())
+	generateBodyBinding(&builder, "r.Form", field, reflect.TypeOf(multipartForm{}).PkgPath(), nil)
 	output := builder.String()
 
 	if !strings.Contains(output, "ParseMultipartForm") {
