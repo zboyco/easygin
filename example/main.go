@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/zboyco/easygin"
 	"github.com/zboyco/easygin/example/apis"
 )
@@ -16,5 +19,8 @@ func main() {
 	easygin.SetLogLevel(easygin.DebugLevel)
 
 	srv := easygin.NewServer(serverName, ":80", true)
-	srv.Run(apis.RouterRoot)
+	if err := srv.Run(apis.RouterRoot); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }

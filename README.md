@@ -141,8 +141,10 @@ func (req *GetUser) Output(ctx context.Context) (any, error) {
 ```go
 type ListUser struct {
     easygin.MethodGet `summary:"获取用户列表"`
-    Name   string `in:"query" name:"name,omitempty" desc:"用户名"`
-    AgeMin int    `in:"query" name:"age_min,omitempty" default:"18" desc:"最小年龄"`
+    Name      string   `in:"query" name:"name,omitempty" desc:"用户名"`
+    AgeMin    int      `in:"query" name:"age_min,omitempty" default:"18" desc:"最小年龄"`
+    TagIDs    []int    `in:"query" name:"tag_id,omitempty" desc:"标签ID，可重复传入 tag_id=1&tag_id=2"`
+    CreatedAt []MyTime `in:"query" name:"created_at,omitempty" desc:"实现 encoding.TextUnmarshaler 的时间切片"`
 }
 
 func (ListUser) Path() string {
@@ -160,6 +162,8 @@ func (req *ListUser) Output(ctx context.Context) (any, error) {
     }}, nil
 }
 ```
+
+查询参数切片会使用同名参数数组解析，例如 `?tag_id=1&tag_id=2`。静态参数绑定支持 `[]T`、`*[]T`、`[]*T`、`*[]*T` 形态，元素类型支持 `string`、`bool`、各整数/浮点类型，以及实现 `encoding.TextUnmarshaler` 的自定义类型（含指针接收者的 `UnmarshalText`）。
 
 #### JSON请求体绑定
 
@@ -426,6 +430,12 @@ go run main.go gen
 ```
 
 这将为每个包生成 `zz_easygin_generated.go` 文件，包含静态的参数绑定方法。   
+
+生成期间如果遇到静态绑定暂不支持的参数类型，命令会直接返回错误并以非 0 状态退出，不会把 `unsupported` 分支写入生成文件。例如不支持的 query 切片类型会输出类似：
+
+```text
+[EasyGin] generate parameters bind failed: failed to generate file for package ...: ListUser: unsupported query slice parameter type "[]struct {}" for field r.Unsupported
+```
 
 ![静态参数绑定方法生成演示](https://raw.githubusercontent.com/zboyco/easygin/main/example/gen.gif)   
 

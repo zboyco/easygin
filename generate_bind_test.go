@@ -2,6 +2,7 @@ package easygin
 
 import (
 	"context"
+	"encoding"
 	"mime/multipart"
 	"reflect"
 	"strings"
@@ -47,7 +48,9 @@ func TestGeneratePathBindingRequired(t *testing.T) {
 	field := reflect.TypeOf(pathStruct{}).Field(0)
 
 	var builder strings.Builder
-	generatePathBinding(&builder, "r.ID", "item_id", field, reflect.TypeOf(pathStruct{}).PkgPath(), nil)
+	if err := generatePathBinding(&builder, "r.ID", "item_id", field, reflect.TypeOf(pathStruct{}).PkgPath(), nil); err != nil {
+		t.Fatalf("generatePathBinding returned error: %v", err)
+	}
 	output := builder.String()
 
 	if !strings.Contains(output, `return errors.New("missing required parameter 'item_id' in path")`) {
@@ -65,7 +68,9 @@ func TestGenerateQueryBindingOptionalDefault(t *testing.T) {
 	field := reflect.TypeOf(queryStruct{}).Field(0)
 
 	var builder strings.Builder
-	generateQueryBinding(&builder, "r.Name", "name", field, reflect.TypeOf(queryStruct{}).PkgPath(), nil)
+	if err := generateQueryBinding(&builder, "r.Name", "name", field, reflect.TypeOf(queryStruct{}).PkgPath(), nil); err != nil {
+		t.Fatalf("generateQueryBinding returned error: %v", err)
+	}
 	output := builder.String()
 
 	if !strings.Contains(output, `queryVal = "anonymous"`) {
@@ -83,7 +88,7 @@ func TestGenerateQuerySliceBindingIntPtr(t *testing.T) {
 	field := reflect.TypeOf(sliceStruct{}).Field(0)
 
 	var builder strings.Builder
-	ok := generateQuerySliceBinding(&builder, "r.IDs", "ids", field.Type, false, false)
+	ok := generateQuerySliceBinding(&builder, "r.IDs", "ids", field.Type, false, false, reflect.TypeOf(sliceStruct{}).PkgPath(), nil)
 	if !ok {
 		t.Fatal("expected slice type to be supported")
 	}
@@ -97,6 +102,54 @@ func TestGenerateQuerySliceBindingIntPtr(t *testing.T) {
 	}
 }
 
+func TestGenerateQuerySliceBindingTextUnmarshaler(t *testing.T) {
+	type sliceStruct struct {
+		Values []testTextValue `in:"query" name:"values"`
+	}
+	field := reflect.TypeOf(sliceStruct{}).Field(0)
+
+	var builder strings.Builder
+	ok := generateQuerySliceBinding(&builder, "r.Values", "values", field.Type, false, false, reflect.TypeOf(sliceStruct{}).PkgPath(), nil)
+	if !ok {
+		t.Fatal("expected TextUnmarshaler slice type to be supported")
+	}
+
+	output := builder.String()
+	if !strings.Contains(output, "parsedVal := new(testTextValue)") {
+		t.Fatalf("missing TextUnmarshaler element allocation in generated slice binding:\n%s", output)
+	}
+	if !strings.Contains(output, "if err := parsedVal.UnmarshalText([]byte(val)); err != nil {") {
+		t.Fatalf("missing TextUnmarshaler parsing in generated slice binding:\n%s", output)
+	}
+	if !strings.Contains(output, "convertedVals = append(convertedVals, *parsedVal)") {
+		t.Fatalf("missing value element append in generated slice binding:\n%s", output)
+	}
+}
+
+func TestGenerateQuerySliceBindingTextUnmarshalerPtrElem(t *testing.T) {
+	type sliceStruct struct {
+		Values []*testTextValue `in:"query" name:"values"`
+	}
+	field := reflect.TypeOf(sliceStruct{}).Field(0)
+
+	var builder strings.Builder
+	ok := generateQuerySliceBinding(&builder, "r.Values", "values", field.Type, false, false, reflect.TypeOf(sliceStruct{}).PkgPath(), nil)
+	if !ok {
+		t.Fatal("expected TextUnmarshaler pointer element slice type to be supported")
+	}
+
+	output := builder.String()
+	if !strings.Contains(output, "convertedVals := make([]*testTextValue, 0, len(queryVals))") {
+		t.Fatalf("missing pointer element slice allocation in generated slice binding:\n%s", output)
+	}
+	if !strings.Contains(output, "convertedVals = append(convertedVals, parsedVal)") {
+		t.Fatalf("missing pointer element append in generated slice binding:\n%s", output)
+	}
+	if strings.Contains(output, "append(convertedVals, *parsedVal)") {
+		t.Fatalf("pointer element slice should append parsed pointers, got:\n%s", output)
+	}
+}
+
 func TestGenerateBodyBindingJSONPointer(t *testing.T) {
 	type bodyStruct struct {
 		Payload *struct {
@@ -106,7 +159,9 @@ func TestGenerateBodyBindingJSONPointer(t *testing.T) {
 	field := reflect.TypeOf(bodyStruct{}).Field(0)
 
 	var builder strings.Builder
-	generateBodyBinding(&builder, "r.Payload", field, reflect.TypeOf(bodyStruct{}).PkgPath(), nil)
+	if err := generateBodyBinding(&builder, "r.Payload", field, reflect.TypeOf(bodyStruct{}).PkgPath(), nil); err != nil {
+		t.Fatalf("generateBodyBinding returned error: %v", err)
+	}
 	output := builder.String()
 
 	if !strings.Contains(output, "if r.Payload == nil") {
@@ -130,7 +185,9 @@ func TestGenerateBodyBindingMultipartForm(t *testing.T) {
 	field := reflect.TypeOf(multipartForm{}).Field(0)
 
 	var builder strings.Builder
-	generateBodyBinding(&builder, "r.Form", field, reflect.TypeOf(multipartForm{}).PkgPath(), nil)
+	if err := generateBodyBinding(&builder, "r.Form", field, reflect.TypeOf(multipartForm{}).PkgPath(), nil); err != nil {
+		t.Fatalf("generateBodyBinding returned error: %v", err)
+	}
 	output := builder.String()
 
 	if !strings.Contains(output, "ParseMultipartForm") {
@@ -145,7 +202,7 @@ func TestGenerateBodyBindingMultipartForm(t *testing.T) {
 }
 
 func TestGenerateFileContentDedupAndImports(t *testing.T) {
-	content := generateFileContent(
+	content, err := generateFileContent(
 		"github.com/zboyco/easygin/custompkg",
 		[]RouterHandler{
 			&complexBindingAPI{},
@@ -153,6 +210,9 @@ func TestGenerateFileContentDedupAndImports(t *testing.T) {
 			&headerOnlyAPI{},
 		},
 	)
+	if err != nil {
+		t.Fatalf("generateFileContent returned error: %v", err)
+	}
 
 	if count := strings.Count(content, "func (r *complexBindingAPI) EasyGinBindParameters("); count != 1 {
 		t.Fatalf("expected 1 generated method for complexBindingAPI, got %d", count)
@@ -179,6 +239,22 @@ func TestGenerateFileContentDedupAndImports(t *testing.T) {
 	}
 }
 
+func TestGenerateFileContentUnsupportedQuerySliceFails(t *testing.T) {
+	_, err := generateFileContent(
+		"github.com/zboyco/easygin",
+		[]RouterHandler{&unsupportedQuerySliceAPI{}},
+	)
+	if err == nil {
+		t.Fatal("expected unsupported query slice type to fail generation")
+	}
+	if !strings.Contains(err.Error(), "unsupported query slice parameter type") {
+		t.Fatalf("expected unsupported query slice error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Unsupported") {
+		t.Fatalf("expected API type context in error, got: %v", err)
+	}
+}
+
 // --- Helpers ----------------------------------------------------------------
 
 type testMiddleware struct {
@@ -196,6 +272,15 @@ func (testMiddlewareNoGen) Output(context.Context) (any, error) {
 }
 
 func (testMiddlewareNoGen) IgnoreGenParameter() {}
+
+type testTextValue string
+
+var _ encoding.TextUnmarshaler = (*testTextValue)(nil)
+
+func (v *testTextValue) UnmarshalText(data []byte) error {
+	*v = testTextValue(data)
+	return nil
+}
 
 type testSimpleAPI struct {
 	name string
@@ -261,3 +346,13 @@ func (a *headerOnlyAPI) Method() string { return "GET" }
 func (a *headerOnlyAPI) Path() string { return "/header" }
 
 func (a *headerOnlyAPI) Output(context.Context) (any, error) { return nil, nil }
+
+type unsupportedQuerySliceAPI struct {
+	Unsupported []struct{} `in:"query" name:"unsupported"`
+}
+
+func (a *unsupportedQuerySliceAPI) Method() string { return "GET" }
+
+func (a *unsupportedQuerySliceAPI) Path() string { return "/unsupported" }
+
+func (a *unsupportedQuerySliceAPI) Output(context.Context) (any, error) { return nil, nil }

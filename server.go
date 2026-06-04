@@ -80,7 +80,10 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 	args := os.Args
 	// 处理生成参数绑定函数的命令
 	if len(args) > 1 && args[1] == "gen" {
-		GenerateParametersBindFunction(groups...)
+		if err := GenerateParametersBindFunction(groups...); err != nil {
+			fmt.Fprintf(os.Stderr, "[EasyGin] generate parameters bind failed: %v\n", err)
+			return err
+		}
 		return nil
 	}
 

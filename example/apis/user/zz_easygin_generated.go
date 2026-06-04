@@ -758,6 +758,36 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 			r.PtrCustomTime = tmpVal
 		}
 	}
+	// 绑定查询参数 sliceTime
+	{
+		queryVals := c.QueryArray("sliceTime")
+		if len(queryVals) > 0 {
+			convertedVals := make([]types.CustomTime, 0, len(queryVals))
+			for _, val := range queryVals {
+				parsedVal := new(types.CustomTime)
+				if err := parsedVal.UnmarshalText([]byte(val)); err != nil {
+					return fmt.Errorf("invalid parameter 'sliceTime': %v", err.Error())
+				}
+				convertedVals = append(convertedVals, *parsedVal)
+			}
+			r.SliceCustomTime = convertedVals
+		}
+	}
+	// 绑定查询参数 slicePtrTime
+	{
+		queryVals := c.QueryArray("slicePtrTime")
+		if len(queryVals) > 0 {
+			convertedVals := make([]*types.CustomTime, 0, len(queryVals))
+			for _, val := range queryVals {
+				parsedVal := new(types.CustomTime)
+				if err := parsedVal.UnmarshalText([]byte(val)); err != nil {
+					return fmt.Errorf("invalid parameter 'slicePtrTime': %v", err.Error())
+				}
+				convertedVals = append(convertedVals, parsedVal)
+			}
+			r.SlicePtrCustomTime = convertedVals
+		}
+	}
 	// 绑定查询参数 sameType
 	{
 		queryVal := c.Query("sameType")
