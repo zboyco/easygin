@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strconv"
 	"strings"
@@ -24,6 +25,12 @@ func (r *CreateUser) EasyGinBindParameters(c *gin.Context) error {
 		// 绑定JSON请求体
 		decoder := json.NewDecoder(c.Request.Body)
 		if err := decoder.Decode(&r.Body); err != nil {
+			return err
+		}
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
+			if err == nil {
+				return errors.New("multiple JSON values are not allowed")
+			}
 			return err
 		}
 

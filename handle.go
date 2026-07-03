@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -15,7 +16,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
-
 
 // fieldInfo 存储字段的元信息
 type fieldInfo struct {
@@ -400,20 +400,20 @@ func renderAPI(h RouterHandler, handlerName string) gin.HandlerFunc {
 		case string:
 			c.String(code, v)
 		case AttachmentFromFile:
-			c.Header("Content-Disposition", fmt.Sprintf("%s; filename=%s", v.Disposition, v.Filename))
+			c.Header("Content-Disposition", contentDisposition(v.Disposition, v.Filename))
 			c.Data(code, v.ContentType, v.Content)
 		case *AttachmentFromFile:
-			c.Header("Content-Disposition", fmt.Sprintf("%s; filename=%s", v.Disposition, v.Filename))
+			c.Header("Content-Disposition", contentDisposition(v.Disposition, v.Filename))
 			c.Data(code, v.ContentType, v.Content)
 		case AttachmentFromReader:
-			c.Header("Content-Disposition", fmt.Sprintf("%s; filename=%s", v.Disposition, v.Filename))
+			c.Header("Content-Disposition", contentDisposition(v.Disposition, v.Filename))
 			c.DataFromReader(code, v.ContentLength, v.ContentType, v.Reader, nil)
 			// if v.Reader implements io.Closer, close it
 			if closer, ok := v.Reader.(io.Closer); ok {
 				_ = closer.Close()
 			}
 		case *AttachmentFromReader:
-			c.Header("Content-Disposition", fmt.Sprintf("%s; filename=%s", v.Disposition, v.Filename))
+			c.Header("Content-Disposition", contentDisposition(v.Disposition, v.Filename))
 			c.DataFromReader(code, v.ContentLength, v.ContentType, v.Reader, nil)
 			// if v.Reader implements io.Closer, close it
 			if closer, ok := v.Reader.(io.Closer); ok {
@@ -423,6 +423,13 @@ func renderAPI(h RouterHandler, handlerName string) gin.HandlerFunc {
 			c.JSON(code, output)
 		}
 	}
+}
+
+// contentDisposition 生成符合 MIME 参数转义规则的 Content-Disposition 响应头。
+func contentDisposition(disposition Disposition, filename string) string {
+	return mime.FormatMediaType(string(disposition), map[string]string{
+		"filename": filename,
+	})
 }
 
 // renderMiddleware 处理中间件

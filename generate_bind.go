@@ -230,7 +230,7 @@ func generatePathBinding(builder *strings.Builder, fieldName, paramName string, 
 				builder.WriteString(fmt.Sprintf("\t\t\tpathVal = \"%s\"\n", defaultValue))
 				builder.WriteString("\t\t}\n")
 			} else {
-				panic(fmt.Sprintf("default value '%s' does not match the field type for parameter '%s'", defaultValue, paramName))
+				return fmt.Errorf("default value %q does not match the field type for parameter %q", defaultValue, paramName)
 			}
 		}
 	}
@@ -297,7 +297,7 @@ func generateQueryBinding(builder *strings.Builder, fieldName, paramName string,
 				builder.WriteString(fmt.Sprintf("\t\t\tqueryVal = \"%s\"\n", defaultValue))
 				builder.WriteString("\t\t}\n")
 			} else {
-				panic(fmt.Sprintf("default value '%s' does not match the field type for parameter '%s'", defaultValue, paramName))
+				return fmt.Errorf("default value %q does not match the field type for parameter %q", defaultValue, paramName)
 			}
 		}
 	}
@@ -545,7 +545,7 @@ func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string
 				builder.WriteString(fmt.Sprintf("\t\t\theaderVal = \"%s\"\n", defaultValue))
 				builder.WriteString("\t\t}\n")
 			} else {
-				panic(fmt.Sprintf("default value '%s' does not match the field type for parameter '%s'", defaultValue, paramName))
+				return fmt.Errorf("default value %q does not match the field type for parameter %q", defaultValue, paramName)
 			}
 		}
 	}
@@ -663,6 +663,12 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 
 		builder.WriteString("\t\t\treturn err\n")
 		builder.WriteString("\t\t}\n")
+		builder.WriteString("\t\tif err := decoder.Decode(&struct{}{}); err != io.EOF {\n")
+		builder.WriteString("\t\t\tif err == nil {\n")
+		builder.WriteString("\t\t\t\treturn errors.New(\"multiple JSON values are not allowed\")\n")
+		builder.WriteString("\t\t\t}\n")
+		builder.WriteString("\t\t\treturn err\n")
+		builder.WriteString("\t\t}\n")
 
 		// TODO 待优化项，目前使用的是ValidateJsonRequiredFields反射校验，性能较差
 		// 后续考虑根据结构体生成对应的校验代码，性能更好
@@ -758,7 +764,7 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 					builder.WriteString(fmt.Sprintf("\t\t\tformVal = \"%s\"\n", defaultValue))
 					builder.WriteString("\t\t}\n")
 				} else {
-					panic(fmt.Sprintf("default value '%s' does not match the field type for parameter '%s'", defaultValue, paramName))
+					return fmt.Errorf("default value %q does not match the field type for parameter %q", defaultValue, paramName)
 				}
 			}
 		}
@@ -1001,6 +1007,7 @@ func generateFileContent(pkgPath string, apis []RouterHandler) (string, error) {
 		"encoding/json":             false,
 		"errors":                    false,
 		"fmt":                       false,
+		"io":                        false,
 		"reflect":                   false,
 		"strconv":                   false,
 		"strings":                   false,
@@ -1013,6 +1020,7 @@ func generateFileContent(pkgPath string, apis []RouterHandler) (string, error) {
 		"encoding/json",
 		"errors",
 		"fmt",
+		"io",
 		"reflect",
 		"strconv",
 		"strings",
@@ -1147,6 +1155,9 @@ func markUsedImports(method string, usedImports map[string]bool) {
 	}
 	if strings.Contains(method, "fmt.") {
 		usedImports["fmt"] = true
+	}
+	if strings.Contains(method, "io.") {
+		usedImports["io"] = true
 	}
 	if strings.Contains(method, "json.") {
 		usedImports["encoding/json"] = true

@@ -81,6 +81,57 @@ func TestGenerateQueryBindingOptionalDefault(t *testing.T) {
 	}
 }
 
+func TestGenerateBindingInvalidDefaultReturnsError(t *testing.T) {
+	tests := []struct {
+		name     string
+		tag      string
+		generate func(*strings.Builder, reflect.StructField) error
+	}{
+		{
+			name: "path",
+			tag:  `in:"path" name:"id,omitempty" default:"bad"`,
+			generate: func(builder *strings.Builder, field reflect.StructField) error {
+				return generatePathBinding(builder, "r.ID", "id", field, reflect.TypeOf(struct{}{}).PkgPath(), nil)
+			},
+		},
+		{
+			name: "query",
+			tag:  `in:"query" name:"id,omitempty" default:"bad"`,
+			generate: func(builder *strings.Builder, field reflect.StructField) error {
+				return generateQueryBinding(builder, "r.ID", "id", field, reflect.TypeOf(struct{}{}).PkgPath(), nil)
+			},
+		},
+		{
+			name: "header",
+			tag:  `in:"header" name:"id,omitempty" default:"bad"`,
+			generate: func(builder *strings.Builder, field reflect.StructField) error {
+				return generateHeaderBinding(builder, "r.ID", "id", field, reflect.TypeOf(struct{}{}).PkgPath(), nil)
+			},
+		},
+		{
+			name: "form",
+			tag:  `name:"id,omitempty" default:"bad"`,
+			generate: func(builder *strings.Builder, field reflect.StructField) error {
+				return generateFormBinding(builder, "r.ID", "id", field, reflect.TypeOf(struct{}{}).PkgPath(), nil)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			field := fieldWithTag(t, tt.tag)
+			var builder strings.Builder
+			err := tt.generate(&builder, field)
+			if err == nil {
+				t.Fatal("expected invalid default to return error")
+			}
+			if !strings.Contains(err.Error(), "default value") {
+				t.Fatalf("expected default value error, got: %v", err)
+			}
+		})
+	}
+}
+
 func TestGenerateQuerySliceBindingIntPtr(t *testing.T) {
 	type sliceStruct struct {
 		IDs []*int `in:"query" name:"ids"`
@@ -169,6 +220,9 @@ func TestGenerateBodyBindingJSONPointer(t *testing.T) {
 	}
 	if !strings.Contains(output, "decoder := json.NewDecoder") {
 		t.Fatalf("expected JSON decoder block, got:\n%s", output)
+	}
+	if !strings.Contains(output, "decoder.Decode(&struct{}{})") || !strings.Contains(output, "multiple JSON values are not allowed") {
+		t.Fatalf("expected multiple JSON value guard, got:\n%s", output)
 	}
 	if !strings.Contains(output, "easygin.ValidateJsonRequiredFields") {
 		t.Fatalf("expected validation call, got:\n%s", output)
@@ -318,6 +372,17 @@ func assertAPI(t *testing.T, handler RouterHandler, name string) {
 	if api.name != name {
 		t.Fatalf("expected API %s, got %s", name, api.name)
 	}
+}
+
+func fieldWithTag(t *testing.T, tag string) reflect.StructField {
+	t.Helper()
+
+	structType := reflect.StructOf([]reflect.StructField{{
+		Name: "ID",
+		Type: reflect.TypeOf(0),
+		Tag:  reflect.StructTag(tag),
+	}})
+	return structType.Field(0)
 }
 
 type complexBindingAPI struct {

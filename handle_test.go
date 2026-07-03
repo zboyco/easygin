@@ -12,6 +12,43 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestDecodeJSONRejectsMultipleJSONValues(t *testing.T) {
+	var payload TestBodyPayload
+	err := decodeJSON(strings.NewReader(`{"value":"one"}{"value":"two"}`), &payload)
+	if err == nil {
+		t.Fatal("expected multiple JSON values to be rejected")
+	}
+	if !strings.Contains(err.Error(), "multiple JSON values are not allowed") {
+		t.Fatalf("expected multiple JSON values error, got: %v", err)
+	}
+}
+
+func TestContentDispositionEscapesFilename(t *testing.T) {
+	header := contentDisposition(DispositionAttachment, `report "一".txt`)
+	if !strings.Contains(header, `attachment`) {
+		t.Fatalf("expected attachment disposition, got %q", header)
+	}
+	if !strings.Contains(header, `filename*=`) {
+		t.Fatalf("expected RFC 5987 filename parameter, got %q", header)
+	}
+}
+
+func TestRenderAPIEscapesAttachmentFilename(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := &TestAttachmentHandler{}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/download", nil)
+
+	renderAPI(handler, "test.attachment")(ctx)
+
+	header := recorder.Header().Get("Content-Disposition")
+	if !strings.Contains(header, `filename*=`) {
+		t.Fatalf("expected escaped Content-Disposition filename, got %q", header)
+	}
+}
+
 func TestBindParamsInitializesEmbeddedPointerFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -302,6 +339,8 @@ type TestMultipartFilesHandler struct {
 	Body *TestMultipartFilesBody `in:"body" mime:"multipart"`
 }
 
+type TestAttachmentHandler struct{}
+
 type TestMultipartFilesBody struct {
 	Single *multipart.FileHeader   `name:"file"`
 	Multi  []*multipart.FileHeader `name:"files"`
@@ -333,4 +372,14 @@ func (h *TestOptionalQueryHandler) Output(ctx context.Context) (any, error) {
 
 func (h *TestMultipartFilesHandler) Output(ctx context.Context) (any, error) {
 	return nil, nil
+}
+
+func (h *TestAttachmentHandler) Output(ctx context.Context) (any, error) {
+	return &AttachmentFromReader{
+		Disposition:   DispositionAttachment,
+		ContentType:   "text/plain",
+		Filename:      `report "一".txt`,
+		Reader:        strings.NewReader("ok"),
+		ContentLength: int64(len("ok")),
+	}, nil
 }

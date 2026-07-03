@@ -2,6 +2,7 @@ package easygin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -26,6 +27,12 @@ func decodeJSON(r io.Reader, v any) error {
 	// 使用json.NewDecoder避免额外的内存分配
 	decoder := json.NewDecoder(r)
 	if err := decoder.Decode(v); err != nil {
+		return fmt.Errorf("parse json failed: %v", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return fmt.Errorf("parse json failed: multiple JSON values are not allowed")
+		}
 		return fmt.Errorf("parse json failed: %v", err)
 	}
 
