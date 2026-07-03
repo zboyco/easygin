@@ -121,7 +121,7 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 	// 添加请求主路由到上下文中
 	s.engine.Use(func(c *gin.Context) {
 		// 定位到主处理函数
-		mainHandler := s.handlerMap[fmt.Sprintf("%s %s", c.Request.Method, c.FullPath())]
+		mainHandler := routeFromHandlerMap(s.handlerMap, c.Request.Method, c.FullPath())
 		if mainHandler != nil {
 			// 将路由添加到上下文中，以便后续处理函数使用
 			c.Request = c.Request.WithContext(ContextWithRoute(c.Request.Context(), mainHandler))
@@ -261,7 +261,7 @@ func handleGroup(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *Rou
 		if _, ok := handlerMap[key]; ok {
 			panic(fmt.Sprintf("duplicate route %s %s", method, routePath))
 		}
-		handlerMap[fmt.Sprintf("%s %s", method, routePath)] = handler
+		handlerMap[key] = handler
 
 		// 打印中间件和处理器
 		if len(middlewareNames) > 0 {
@@ -295,6 +295,15 @@ func handleGroup(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *Rou
 	for _, sub := range group.children {
 		handleGroup(handlerMap, g, sub, middlewareNames...)
 	}
+}
+
+// routeFromHandlerMap 按请求方法查找路由，未命中时回退到 ANY 路由。
+func routeFromHandlerMap(handlerMap map[string]RouterAPI, method, fullPath string) RouterAPI {
+	mainHandler := handlerMap[fmt.Sprintf("%s %s", method, fullPath)]
+	if mainHandler == nil {
+		mainHandler = handlerMap[fmt.Sprintf("ANY %s", fullPath)]
+	}
+	return mainHandler
 }
 
 // getShortMethod 获取HTTP方法的简短表示

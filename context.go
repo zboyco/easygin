@@ -50,5 +50,8 @@ func RouteFromContext(ctx context.Context) RouterAPI {
 	if raw == nil {
 		return nil
 	}
-	return raw.(RouterAPI)
+	if route, ok := raw.(RouterAPI); ok {
+		return route
+	}
+	return nil
 }

@@ -16,7 +16,7 @@ import (
 // 全局日志等级
 var globalLogLevel = zerolog.InfoLevel
 
-// SetLogLevel 设置全局日志等级
+// SetLogLevel 设置全局日志等级，应在服务启动前调用。
 func SetLogLevel(l Level) {
 	globalLogLevel = zerolog.Level(l)
 }
@@ -85,7 +85,10 @@ func (t *spanLogger) Start(ctx context.Context, name string, keyAndValues ...int
 		trace.WithAttributes(attrsFromKeyAndValues(keyAndValues...)...),
 		trace.WithTimestamp(time.Now()),
 	)
-	return childCtx, &spanLogger{span: childSpan}
+	return childCtx, &spanLogger{
+		serviceName: t.serviceName,
+		span:        childSpan,
+	}
 }
 
 func (t *spanLogger) End() {
