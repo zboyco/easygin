@@ -2,8 +2,8 @@
 
 ## 文件概述
 - 包名: `easygin`
-- 主要功能: 处理 HTTP 请求、参数绑定和响应生成
-- 核心机制: 基于反射的参数绑定和类型转换
+- 主要功能: 处理 HTTP 请求、参数绑定、上下文注入和响应生成
+- 核心机制: 优先使用生成的 `EasyGinBindParameters` 静态绑定方法；未生成时回退到基于反射的参数绑定和类型转换
 
 ## 核心数据结构
 
@@ -17,6 +17,7 @@
   - `tagType`: 标签类型 (path, query, header, body)
   - `tagName`: 标签名称
   - `tagNames`: 标签名称列表，包含选项如omitempty
+- 嵌入指针字段会记录完整索引路径，绑定时通过 `getOrInitFieldByIndex` 自动初始化中间层指针
 
 ### 响应类型
 - `WithStatusCode`: 自定义状态码的响应
@@ -32,7 +33,7 @@
   - `ContentType`: 内容类型
   - `Filename`: 文件名
   - `Reader`: 内容读取器
-  - `ContentLength`: 内容长度
+  - `ContentLength`: 内容长度；正数表示精确长度，`0` 表示空文件，`-1` 表示未知长度并使用分块传输
 
 ## 主要函数索引
 
@@ -87,12 +88,23 @@
 - 处理内容:
   1. 创建新的结构体实例
   2. 检查是否实现了WithBindParameters接口
+     - 如果实现，直接调用生成的 `EasyGinBindParameters`
   3. 获取缓存的字段信息
-  4. 处理不同类型的参数 (body, query, path, header)
-  5. 处理multipart表单和JSON请求体
-  6. 处理默认值和必填参数验证
+  4. 使用 `getOrInitFieldByIndex` 获取嵌套字段，并自动初始化嵌入指针结构体
+  5. 处理不同类型的参数 (body, query, path, header)
+  6. 处理multipart表单和JSON请求体
+  7. 处理默认值和必填参数验证
 
-### 7. renderAPI
+### 7. getOrInitFieldByIndex
+- 签名: `func getOrInitFieldByIndex(v reflect.Value, index []int) (reflect.Value, error)`
+- 功能: 根据字段索引路径获取字段值，遇到中间层嵌入指针为 `nil` 时自动初始化
+- 处理内容:
+  1. 逐层展开指针和结构体字段
+  2. 校验索引范围和字段类型
+  3. 遇到可设置的 nil 指针结构体时创建新实例
+  4. 无法初始化或索引非法时返回错误，避免反射 panic
+
+### 8. renderAPI
 - 签名: `func renderAPI(h RouterHandler, handlerName string) gin.HandlerFunc`
 - 功能: 处理API请求并生成响应
 - 处理内容:
@@ -101,8 +113,16 @@
   3. 处理自定义状态码
   4. 根据返回值类型生成不同的响应
   5. 支持多种响应类型 (JSON, 字符串, 重定向, 文件)
+  6. 文件响应通过 `contentDisposition` 设置符合 MIME 参数转义规则的 `Content-Disposition`
 
-### 8. renderMiddleware
+### 9. contentDisposition
+- 签名: `func contentDisposition(disposition Disposition, filename string) string`
+- 功能: 生成符合 MIME 参数转义规则的 `Content-Disposition` 响应头
+- 处理内容:
+  1. 使用 `mime.FormatMediaType` 组合 disposition 和 filename
+  2. 文件名含空格、引号或非 ASCII 字符时生成兼容的转义参数，例如 `filename*`
+
+### 10. renderMiddleware
 - 签名: `func renderMiddleware(h RouterHandler, handlerName string) gin.HandlerFunc`
 - 功能: 处理中间件逻辑
 - 处理内容:
@@ -111,7 +131,7 @@
   3. 将结果存入请求上下文
   4. 继续处理后续中间件和路由
 
-### 9. renderGinHandler
+### 11. renderGinHandler
 - 签名: `func renderGinHandler(h GinHandler, handlerName string) gin.HandlerFunc`
 - 功能: 处理原生Gin处理器
 - 处理内容:
@@ -119,7 +139,7 @@
   2. 调用GinHandler的GinHandle方法获取原生gin.HandlerFunc
   3. 执行原生处理器函数
 
-### 10. handleRouter
+### 12. handleRouter
 - 签名: `func handleRouter(c *gin.Context, h RouterHandler) (any, error)`
 - 功能: 处理通用的RouterHandler逻辑
 - 处理内容:
@@ -142,13 +162,14 @@
    - 如果实现了，调用EasyGinBindParameters方法
    - 否则，使用反射进行参数绑定
 3. 获取缓存的字段信息
-4. 遍历字段，根据标签类型进行不同处理
-5. 处理必填参数和默认值
-6. 进行类型转换和赋值
+4. 自动初始化嵌入指针字段链路，避免 `*Embedded` 字段为 nil 时访问子字段 panic
+5. 遍历字段，根据标签类型进行不同处理
+6. 处理必填参数和默认值
+7. 进行类型转换和赋值
 
 ### 3. 特殊处理
 - multipart表单: 解析表单数据，处理文件上传
-- JSON请求体: 解析JSON数据，支持嵌套结构
+- JSON请求体: 解析JSON数据，支持嵌套结构；连续多个 JSON 值会被 `decodeJSON` 拒绝
 - 时间类型: 特殊处理时间格式
 - 指针类型: 处理nil指针和指针指向的值
 
@@ -168,7 +189,7 @@
 4. 处理nil返回值，返回204 No Content或自定义状态码
 
 ### 3. 特殊处理
-- 文件响应: 设置Content-Disposition头，处理文件下载
+- 文件响应: 设置 `Content-Disposition` 头，文件名按 MIME 参数规则转义，支持包含引号或非 ASCII 字符的文件名
 - 流式响应: 使用DataFromReader处理大文件或流式数据
 - 资源管理: 自动关闭实现了io.Closer接口的文件资源
 - 错误处理: 统一格式的错误响应
@@ -238,9 +259,9 @@
 
 ## 上下文处理
 
-### GinContextKey
-- 类型: `type GinContextKey int`
-- 用途: 作为context.Context的键，存储gin.Context
+### contextKey
+- 类型: `type contextKey int`
+- 用途: 作为内部 context key，分别存储 handlerName、`*gin.Context` 和当前 `RouterAPI`
 
 ### ContextKey接口
 - 方法: `ContextKey() interface{}`
@@ -250,3 +271,5 @@
 - 将gin.Context添加到context.Context
 - 在非中间件函数中访问gin.Context
 - 中间件返回值传递给后续处理器
+- `RouteFromContext` 会使用安全类型断言，值不存在或类型不匹配时返回 `nil`
+- `Server` 注入当前路由时会优先按真实 HTTP 方法匹配，未命中时回退匹配 `ANY` 路由，保证 `MethodAny` 路由也能通过 `RouteFromContext` 获取

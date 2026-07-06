@@ -34,11 +34,13 @@
 ## 主要函数索引
 
 ### 1. decodeJSON
-- 签名: `func decodeJSON(r io.Reader, v interface{}) error`
+- 签名: `func decodeJSON(r io.Reader, v any) error`
 - 功能: 从请求中解析JSON数据并验证必填字段
 - 流程:
   1. 使用`json.NewDecoder`解析JSON数据
-  2. 如果启用了JSON字段验证，调用`ValidateJsonRequiredFields`验证必填字段
+  2. 解析后继续读取一个空结构体，只有遇到 `io.EOF` 才表示请求体结束
+  3. 如果存在第二个 JSON 值，返回 `parse json failed: multiple JSON values are not allowed`
+  4. 如果启用了JSON字段验证，调用`ValidateJsonRequiredFields`验证必填字段
 
 ### 2. ValidateJsonRequiredFields
 - 签名: `func ValidateJsonRequiredFields(v reflect.Value) error`
@@ -64,7 +66,7 @@
   1. 基本类型 (字符串、整数、浮点数、布尔值)
   2. 复合类型 (数组、切片、映射)
   3. 指针和接口
-  4. 结构体 (特殊处理time.Time)
+  4. 结构体（递归判断所有字段，`time.Time` 零值也会被判空）
 
 ### 5. getValidateFields
 - 签名: `func getValidateFields(t reflect.Type) []validateFieldInfo`
@@ -75,12 +77,12 @@
   3. 存储解析结果到缓存
 
 ### 6. decodeMultipartForm
-- 签名: `func decodeMultipartForm(form *multipart.Form, v interface{}) error`
+- 签名: `func decodeMultipartForm(form *multipart.Form, v any) error`
 - 功能: 从请求中解析multipart表单数据
 - 处理内容:
   1. 获取缓存的表单字段信息
-  2. 处理文件字段
-  3. 处理普通字段和切片字段
+  2. 处理文件字段：`*multipart.FileHeader` 取第一个文件，`[]*multipart.FileHeader` 取同名文件数组
+  3. 处理普通字段和切片字段：普通字段取第一个值，切片字段遍历所有同名值并逐项转换
   4. 验证必填字段和设置默认值
 
 ### 7. handleFormFieldValue
@@ -96,9 +98,10 @@
 - 签名: `func handleSliceValue(fieldVal reflect.Value, vals []string, name string) error`
 - 功能: 处理数组类型字段的值
 - 处理内容:
-  1. 创建新的切片
-  2. 设置每个元素的值
-  3. 处理空值情况
+  1. 没有值且元素类型为 string 时，设置为空切片
+  2. 按输入值数量创建新切片
+  3. 使用 `setFieldValue` 设置每个元素的值
+  4. 将新切片写回字段
 
 ### 9. getFormFields
 - 签名: `func getFormFields(t reflect.Type) []formFieldInfo`
@@ -108,6 +111,7 @@
   2. 缓存未命中时解析字段信息
   3. 判断字段类型 (文件、切片等)
   4. 存储解析结果到缓存
+- 支持的文件字段形态为 `*multipart.FileHeader` 和 `[]*multipart.FileHeader`；其他切片按普通表单值切片处理
 
 ## 缓存机制
 
@@ -154,7 +158,7 @@
 - 减少重复解析标签和结构体的开销
 
 ### 内存优化
-- 使用`json.NewDecoder`避免额外的内存分配
+- 使用`json.NewDecoder`避免额外的内存分配，并拒绝单个请求体中携带多个连续 JSON 值
 - 预分配切片容量，减少动态扩容
 - 复用已有的结构体实例
 
@@ -168,10 +172,11 @@
 - 类型转换错误
 - 默认值设置错误
 - 文件上传错误
+- JSON 请求体错误：解析失败、非 EOF 尾随内容、连续多个 JSON 值都会以 `parse json failed: ...` 包装返回
 
 ## 特殊类型处理
 - `time.Time`: 特殊处理空值检查
 - `multipart.FileHeader`: 处理文件上传
 - 指针类型: 处理nil指针和指针指向的值
 - 结构体类型: 递归处理嵌套结构体
-- 切片类型: 处理多值表单字段
+- 切片类型: 处理多值表单字段；运行时反射绑定的 query 参数仍按单值读取，query 切片能力由静态参数绑定生成代码提供

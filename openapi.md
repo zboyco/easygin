@@ -15,6 +15,7 @@
   2. 创建 OpenAPI 规范文档结构
   3. 遍历所有路由组，生成路径信息
   4. 将文档序列化为 JSON 并保存到文件
+- 输出文件固定为当前工作目录下的 `openapi.json`，可通过 `NewOpenAPIRouter` 或 `OpenAPIRouter` 暴露访问
 
 ### generateOperationID
 - 签名: `func generateOperationID(apiType reflect.Type) string`
@@ -37,7 +38,8 @@
   3. 标签以 RouterGroup 完整路径命名，按需添加
   4. 为每个 API 生成 operationId（通过 `generateOperationID` 函数）
   5. 默认挂载 `default` 响应（携带 `Error` Schema），未实现 `RouterResponse` 时自动添加 200 响应
-  6. 递归处理子组，传递当前组的中间件参数
+  6. `RouterResponse` 的响应体为 `nil` 时只生成响应描述，不生成 `content`
+  7. 递归处理子组，传递当前组的中间件参数
 
 ### processStructFields
 - 签名: `func processStructFields(doc *openapi3.T, t reflect.Type, op *openapi3.Operation, processedTypes map[reflect.Type]bool)`
@@ -54,7 +56,7 @@
 - 特性:
   1. 处理指针类型
   2. 特殊处理 time.Time 及其别名、multipart.FileHeader 及其别名
-  3. 实现 `encoding.TextUnmarshaler` 的类型统一映射为字符串
+  3. 实现 `encoding.TextUnmarshaler` 的命名类型统一映射为字符串；`time.Time` 本身不走该分支，仍按 `date-time` 处理
   4. 将结构体类型添加到 components/schemas，组件名使用 `snakeToPascalCase` 规整化
   5. 支持引用已定义的组件
   6. 使用 `processedTypes` 映射跟踪已处理类型，避免无限递归；已处理类型直接返回 `$ref` 扩展字段（不包 allOf）
@@ -72,6 +74,7 @@
   7. 支持根据 JSON 标签中的类型指定（如 `json:"field,string"`）生成相应的 OpenAPI 类型
   8. `isMultipart` 为 true 时使用 `name` 标签解析字段名并识别 `omitempty`，用于 multipart/form-data 表单
   9. 实现 `TextUnmarshaler` 的字段和自定义时间/文件别名在 Schema 中按字符串/二进制格式输出
+  10. query/path/header 参数如果是切片或数组，会生成数组 Schema，元素类型继续按上述规则映射
 
 ## 辅助函数
 
@@ -100,7 +103,8 @@
 - 用途: 简化创建指针的操作，特别是在 OpenAPI 规范中需要指针的场景
 
 ### isTextUnmarshalerType
-- 功能: 判断类型（含指针接收者）是否实现 `encoding.TextUnmarshaler`，用于 Schema 中降级为字符串
+- 功能: 判断命名类型（含指针接收者）是否实现 `encoding.TextUnmarshaler`，用于 Schema 中降级为字符串
+- 约束: 匿名结构体不会按 `TextUnmarshaler` 处理；`time.Time` 本身保留 `date-time` 映射，自定义时间类型如果实现 `TextUnmarshaler` 则可映射为普通字符串
 
 ### isFileHeaderTypeOrAlias
 - 功能: 判断类型是否可转换为 `multipart.FileHeader`，在 Schema 中映射为 `string` + `binary` 格式
@@ -131,7 +135,7 @@
 
 ### RouterResponse
 - 功能: 定义 API 响应规范
-- 方法: `Responses() map[int]interface{}`
+- 方法: `Responses() R`，其中 `R` 是 `map[int]any`
 - 用途: 允许 API 定义不同状态码的响应内容和结构
 
 ### NoOpenAPI
@@ -160,11 +164,13 @@
    - 支持路径参数、查询参数、请求体
    - 支持 JSON 和 multipart 表单
    - 处理嵌入字段和标签
+   - 中间件参数会继承到子路由组和 API 操作；中间件不能声明 `in:"body"` 参数
 
 4. **类型映射**:
    - Go 结构体 → OpenAPI 对象
    - Go 基本类型 → OpenAPI 基本类型
    - 特殊处理时间和文件类型
+   - 实现 `encoding.TextUnmarshaler` 的命名类型 → `string`
 
 5. **组件复用**:
    - 将复杂类型添加到 components/schemas

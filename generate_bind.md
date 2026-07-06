@@ -53,7 +53,8 @@
   - 针对匿名结构体指针，使用格式化的多行定义提高可读性
   - 针对命名结构体指针，使用标准实例化方式
   - 为跨包命名结构体指针预先触发 `collectExternalPackages` 收集导入，避免生成代码缺失依赖
-  - `mime:"multipart"` 分支调用 `ParseMultipartForm` 后遍历子字段，复用 `generateFormBinding` 生成表单/文件绑定
+  - `mime:"multipart"` 分支调用 `ParseMultipartForm(1 << 30)` 后遍历子字段，复用 `generateFormBinding` 生成表单/文件绑定
+  - JSON 分支在首次 `Decode` 后继续尝试读取空结构体，只有 `io.EOF` 才表示请求体结束；如果存在第二个 JSON 值会返回 `multiple JSON values are not allowed`
   - JSON 分支通过 `ValidateJsonRequiredFields`（受 `easygin.HandleBodyJsonOmitEmptyAndDefault()` 开关控制）做必填与默认值校验
 - `generateFormBinding`: 生成表单参数绑定代码，签名包含 `currentPkgPath` 与 `pkgAliases`
   - 支持单文件上传 (`*multipart.FileHeader`)
@@ -78,7 +79,7 @@
 - `collectExternalPackages`: 收集结构体中所有字段的外部包，使用别名表匹配类型引用
 - `resolveImportAlias`: 根据包路径获取别名（无别名时取包名）
 - `buildImportAliases`: 构建外部包别名表，避免与已使用包名冲突
-- `markUsedImports`: 扫描生成的方法代码，统计基础包的实际使用情况
+- `markUsedImports`: 扫描生成的方法代码，统计基础包的实际使用情况；JSON 多值防护会按需启用 `io` 导入
 - `isBuiltinType`: 判断是否是内置类型
 - `isDefaultValueValid`: 检查默认值是否与字段类型匹配
 - `assignSliceValue`: 将切片解析结果写回字段，兼容切片指针与普通切片
@@ -100,12 +101,14 @@
 7. 支持 `encoding.TextUnmarshaler` 类型优先使用 `UnmarshalText` 解析，跨包类型自动补全包前缀并导入；query 切片元素实现该接口时也会逐项解析
 8. 支持multipart表单处理，包括文件上传
 9. 支持JSON请求体绑定和验证
+   - JSON 请求体只允许一个 JSON 值；连续多个 JSON 值会在绑定阶段失败
 10. 支持匿名结构体的格式化生成，提高代码可读性
 11. 支持字符串数组和字符串数组指针类型的表单参数处理
 12. 支持查询参数切片的自动绑定，包含切片指针和指针元素；支持基础类型切片和实现 `encoding.TextUnmarshaler` 的自定义类型切片
 13. 零值输入（如 `"0"`, `"false"`, 零时间）会在必填校验前归一为空字符串，避免误判
 14. 同名不同路径的外部包会自动生成别名，基础包仅在实际使用时导入且不参与外部包别名
 15. 同一 API 类型仅生成一次绑定方法，确保导入与生成文件可重复、可复现
+16. 默认值类型不匹配、无法生成类型转换、query 切片类型不支持等问题都会作为生成阶段错误返回，而不是在生成代码里保留运行时 `panic` 或 `unsupported` 分支
 
 ## 代码生成流程
 1. 收集所有API并按包分组
@@ -132,6 +135,7 @@
 - 文件操作错误
 - 默认值类型不匹配错误
 - 生成阶段不支持类型错误：例如不支持的 query 切片类型会返回 `unsupported query slice parameter type "..." for field ...`，错误会从 `GenerateParametersBindFunction` 返回并由 `go run . gen` 输出
+- JSON 多值错误：生成代码会在解析第一个 JSON 值后继续读取，发现第二个 JSON 值时返回 `multiple JSON values are not allowed`
 
 ## 代码生成示例
 生成的代码包含:
@@ -146,3 +150,4 @@
 - 字符串数组指针 (`*[]string`): 使用 `c.PostFormArray()` 获取值后，将其地址赋给字段
 - 查询参数切片: 使用 `c.QueryArray()` 支持一次性解析 `[]string`、`[]bool`、各整数/浮点切片以及上述类型的指针版本（如 `[]*int`、`*[]float64`），并对 `omitempty`、必填校验与类型转换都进行统一处理
 - TextUnmarshaler 查询参数切片: 元素类型 `T` 或 `*T` 实现 `encoding.TextUnmarshaler` 时，支持 `[]T`、`[]*T`、`*[]T`、`*[]*T`，逐个 query 值调用 `UnmarshalText` 后写回字段
+- 自定义命名类型切片: 只有实现 `encoding.TextUnmarshaler` 的自定义命名类型切片会被静态 query 绑定支持；不实现该接口的命名类型切片会在生成阶段报错
