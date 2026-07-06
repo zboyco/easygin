@@ -81,6 +81,81 @@ func TestGenerateQueryBindingOptionalDefault(t *testing.T) {
 	}
 }
 
+// TestGenerateQueryBindingPreservesExplicitZeroValues 验证静态 query 绑定不应把 0/false 改写为空字符串。
+func TestGenerateQueryBindingPreservesExplicitZeroValues(t *testing.T) {
+	type queryParams struct {
+		Count   int  `in:"query" name:"count"`
+		Enabled bool `in:"query" name:"enabled"`
+	}
+
+	tests := []struct {
+		name          string
+		fieldIndex    int
+		forbiddenCode string
+	}{
+		{name: "int zero", fieldIndex: 0, forbiddenCode: `queryVal == "0"`},
+		{name: "bool false", fieldIndex: 1, forbiddenCode: `queryVal == "false"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			field := reflect.TypeOf(queryParams{}).Field(tt.fieldIndex)
+			var builder strings.Builder
+			if err := generateQueryBinding(&builder, "r."+field.Name, strings.Split(field.Tag.Get("name"), ",")[0], field, reflect.TypeOf(queryParams{}).PkgPath(), nil); err != nil {
+				t.Fatalf("generateQueryBinding returned error: %v", err)
+			}
+			if output := builder.String(); strings.Contains(output, tt.forbiddenCode) {
+				t.Fatalf("generated binding treats explicit zero value as missing:\n%s", output)
+			}
+		})
+	}
+}
+
+func TestGenerateBindingUsesFieldBitSize(t *testing.T) {
+	type bitSizeParams struct {
+		SmallInt    int8    `in:"query" name:"small_int"`
+		SmallUint   uint8   `in:"query" name:"small_uint"`
+		SmallFloat  float32 `in:"query" name:"small_float"`
+		SmallIntIDs []int8  `in:"query" name:"small_int_id"`
+	}
+
+	structType := reflect.TypeOf(bitSizeParams{})
+	tests := []struct {
+		name       string
+		fieldIndex int
+		want       string
+	}{
+		{name: "int8", fieldIndex: 0, want: "strconv.ParseInt(queryVal, 10, 8)"},
+		{name: "uint8", fieldIndex: 1, want: "strconv.ParseUint(queryVal, 10, 8)"},
+		{name: "float32", fieldIndex: 2, want: "strconv.ParseFloat(queryVal, 32)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			field := structType.Field(tt.fieldIndex)
+			var builder strings.Builder
+			if err := generateQueryBinding(&builder, "r."+field.Name, strings.Split(field.Tag.Get("name"), ",")[0], field, structType.PkgPath(), nil); err != nil {
+				t.Fatalf("generateQueryBinding returned error: %v", err)
+			}
+			if output := builder.String(); !strings.Contains(output, tt.want) {
+				t.Fatalf("generated binding should use field bit size %q, got:\n%s", tt.want, output)
+			}
+		})
+	}
+
+	t.Run("slice int8", func(t *testing.T) {
+		field := structType.Field(3)
+		var builder strings.Builder
+		ok := generateQuerySliceBinding(&builder, "r."+field.Name, "small_int_id", field.Type, false, false, structType.PkgPath(), nil)
+		if !ok {
+			t.Fatal("expected int8 query slice to be supported")
+		}
+		if output := builder.String(); !strings.Contains(output, "strconv.ParseInt(val, 10, 8)") {
+			t.Fatalf("generated slice binding should use element bit size, got:\n%s", output)
+		}
+	})
+}
+
 func TestGenerateBindingInvalidDefaultReturnsError(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -247,6 +322,12 @@ func TestGenerateBodyBindingMultipartForm(t *testing.T) {
 	if !strings.Contains(output, "ParseMultipartForm") {
 		t.Fatalf("expected multipart parsing block, got:\n%s", output)
 	}
+	if strings.Contains(output, "1 << 30") {
+		t.Fatalf("generated multipart binding hard-codes memory limit instead of using configuration:\n%s", output)
+	}
+	if !strings.Contains(output, "GetMultipartMemoryLimit()") {
+		t.Fatalf("generated multipart binding should call GetMultipartMemoryLimit():\n%s", output)
+	}
 	if !strings.Contains(output, `return errors.New("missing required file 'upload'")`) {
 		t.Fatalf("expected required file error, got:\n%s", output)
 	}
@@ -273,12 +354,12 @@ func TestGenerateFileContentDedupAndImports(t *testing.T) {
 	}
 
 	for _, pkg := range []string{
+		"\"bytes\"",
 		"\"encoding/json\"",
 		"\"errors\"",
 		"\"fmt\"",
 		"\"reflect\"",
 		"\"strconv\"",
-		"\"strings\"",
 		"\"time\"",
 		"\"github.com/gin-gonic/gin\"",
 		"\"github.com/zboyco/easygin\"",

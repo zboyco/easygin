@@ -1,6 +1,9 @@
 package cmd
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestParseNewArgs(t *testing.T) {
 	t.Parallel()
@@ -80,6 +83,44 @@ func TestParseNewArgs(t *testing.T) {
 
 			if got != tt.want {
 				t.Fatalf("parseNewArgs(%v) = %+v, want %+v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProjectNameFromPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{name: "plain", input: "srv-demo", want: "srv-demo"},
+		{name: "relative path", input: "./srv-demo", want: "srv-demo"},
+		{name: "trailing slash", input: filepath.Join("tmp", "srv-demo") + string(filepath.Separator), want: "srv-demo"},
+		{name: "current directory", input: ".", wantErr: true},
+		{name: "blank", input: " ", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := projectNameFromPath(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q, got nil", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("projectNameFromPath returned error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("projectNameFromPath(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}

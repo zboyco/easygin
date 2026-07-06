@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -15,12 +16,12 @@ func runNew(args []string, stdout io.Writer) error {
 		return err
 	}
 
-	projectName := options.projectName
-	if projectName == "" || projectName == "." {
-		return fmt.Errorf("invalid project name %q", projectName)
+	projectName, err := projectNameFromPath(options.projectName)
+	if err != nil {
+		return err
 	}
 
-	projectDir, err := filepath.Abs(projectName)
+	projectDir, err := filepath.Abs(options.projectName)
 	if err != nil {
 		return err
 	}
@@ -32,6 +33,15 @@ func runNew(args []string, stdout io.Writer) error {
 		ServiceName: options.serviceName,
 		RouterPath:  options.routerPath,
 	}, stdout)
+}
+
+func projectNameFromPath(projectPath string) (string, error) {
+	cleanPath := filepath.Clean(strings.TrimSpace(projectPath))
+	projectName := filepath.Base(cleanPath)
+	if cleanPath == "." || projectName == "" || projectName == "." || projectName == string(os.PathSeparator) {
+		return "", fmt.Errorf("invalid project name %q", projectPath)
+	}
+	return projectName, nil
 }
 
 type newOptions struct {

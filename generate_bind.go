@@ -203,9 +203,6 @@ func generatePathBinding(builder *strings.Builder, fieldName, paramName string, 
 	builder.WriteString("\t{\n") // 添加代码块开始
 	builder.WriteString(fmt.Sprintf("\t\tpathVal := c.Param(\"%s\")\n", paramName))
 
-	// 根据字段类型添加零值检查
-	addZeroValueCheck(builder, "pathVal", field.Type)
-
 	// 检查是否必填
 	tagNames := strings.Split(field.Tag.Get("name"), ",")
 	isOmitempty := false
@@ -280,9 +277,6 @@ func generateQueryBinding(builder *strings.Builder, fieldName, paramName string,
 	}
 
 	builder.WriteString(fmt.Sprintf("\t\tqueryVal := c.Query(\"%s\")\n", paramName))
-
-	// 根据字段类型添加零值检查
-	addZeroValueCheck(builder, "queryVal", field.Type)
 
 	if !isOmitempty {
 		builder.WriteString("\t\tif queryVal == \"\" {\n")
@@ -374,7 +368,7 @@ func generateQuerySliceBinding(builder *strings.Builder, fieldName, paramName st
 		baseTypeName := getTypeNameWithPkg(baseType, currentPkgPath, pkgAliases)
 		builder.WriteString(fmt.Sprintf("\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceTypeName))
 		builder.WriteString("\t\t\tfor _, val := range queryVals {\n")
-		builder.WriteString("\t\t\t\tparsedVal, err := strconv.ParseInt(val, 10, 64)\n")
+		builder.WriteString(fmt.Sprintf("\t\t\t\tparsedVal, err := strconv.ParseInt(val, 10, %d)\n", baseType.Bits()))
 		builder.WriteString("\t\t\t\tif err != nil {\n")
 		builder.WriteString(fmt.Sprintf("\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString("\t\t\t\t}\n")
@@ -391,7 +385,7 @@ func generateQuerySliceBinding(builder *strings.Builder, fieldName, paramName st
 		baseTypeName := getTypeNameWithPkg(baseType, currentPkgPath, pkgAliases)
 		builder.WriteString(fmt.Sprintf("\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceTypeName))
 		builder.WriteString("\t\t\tfor _, val := range queryVals {\n")
-		builder.WriteString("\t\t\t\tparsedVal, err := strconv.ParseUint(val, 10, 64)\n")
+		builder.WriteString(fmt.Sprintf("\t\t\t\tparsedVal, err := strconv.ParseUint(val, 10, %d)\n", baseType.Bits()))
 		builder.WriteString("\t\t\t\tif err != nil {\n")
 		builder.WriteString(fmt.Sprintf("\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString("\t\t\t\t}\n")
@@ -408,7 +402,7 @@ func generateQuerySliceBinding(builder *strings.Builder, fieldName, paramName st
 		baseTypeName := getTypeNameWithPkg(baseType, currentPkgPath, pkgAliases)
 		builder.WriteString(fmt.Sprintf("\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceTypeName))
 		builder.WriteString("\t\t\tfor _, val := range queryVals {\n")
-		builder.WriteString("\t\t\t\tfloatVal, err := strconv.ParseFloat(val, 64)\n")
+		builder.WriteString(fmt.Sprintf("\t\t\t\tfloatVal, err := strconv.ParseFloat(val, %d)\n", baseType.Bits()))
 		builder.WriteString("\t\t\t\tif err != nil {\n")
 		builder.WriteString(fmt.Sprintf("\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString("\t\t\t\t}\n")
@@ -519,9 +513,6 @@ func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string
 	builder.WriteString("\t{\n") // 添加代码块开始
 	builder.WriteString(fmt.Sprintf("\t\theaderVal := c.GetHeader(\"%s\")\n", paramName))
 
-	// 根据字段类型添加零值检查
-	addZeroValueCheck(builder, "headerVal", field.Type)
-
 	// 检查是否必填
 	tagNames := strings.Split(field.Tag.Get("name"), ",")
 	isOmitempty := false
@@ -626,7 +617,7 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 
 	if mime == "multipart" {
 		builder.WriteString("\t// 绑定multipart表单数据\n")
-		builder.WriteString("\tif err := c.Request.ParseMultipartForm(1 << 30); err != nil {\n")
+		builder.WriteString("\tif err := c.Request.ParseMultipartForm(easygin.GetMultipartMemoryLimit()); err != nil {\n")
 		builder.WriteString("\t\treturn err\n")
 		builder.WriteString("\t}\n")
 
@@ -652,7 +643,11 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 	} else {
 		builder.WriteString("\t{\n") // 添加代码块开始
 		builder.WriteString("\t\t// 绑定JSON请求体\n")
-		builder.WriteString("\t\tdecoder := json.NewDecoder(c.Request.Body)\n")
+		builder.WriteString("\t\tbodyBytes, err := io.ReadAll(c.Request.Body)\n")
+		builder.WriteString("\t\tif err != nil {\n")
+		builder.WriteString("\t\t\treturn err\n")
+		builder.WriteString("\t\t}\n")
+		builder.WriteString("\t\tdecoder := json.NewDecoder(bytes.NewReader(bodyBytes))\n")
 
 		// 根据字段类型是否为指针决定是否添加&符号
 		if field.Type.Kind() == reflect.Ptr {
@@ -676,7 +671,7 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 		// 使用ValidateJsonRequiredFields进行校验
 		builder.WriteString("\n\t\tif easygin.HandleBodyJsonOmitEmptyAndDefault() {\n")
 		builder.WriteString("\t\t\t// 校验JSON必填字段和默认值\n")
-		builder.WriteString(fmt.Sprintf("\t\t\tif err := easygin.ValidateJsonRequiredFields(reflect.ValueOf(&%s)); err != nil {\n", fieldName))
+		builder.WriteString(fmt.Sprintf("\t\t\tif err := easygin.ValidateJsonRequiredFieldsWithRaw(reflect.ValueOf(&%s), bodyBytes); err != nil {\n", fieldName))
 		builder.WriteString("\t\t\t\treturn err\n")
 		builder.WriteString("\t\t\t}\n")
 		builder.WriteString("\t\t}\n")
@@ -747,9 +742,6 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 	} else {
 		// 处理其他类型
 		builder.WriteString(fmt.Sprintf("\t\tformVal := c.PostForm(\"%s\")\n", paramName))
-
-		// 根据字段类型添加零值检查
-		addZeroValueCheck(builder, "formVal", field.Type)
 
 		if !isOmitempty {
 			builder.WriteString("\t\tif formVal == \"\" {\n")
@@ -866,15 +858,15 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(%s)\n", fieldName, typeName, valName))
 		builder.WriteString(indent + "}\n")
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		builder.WriteString(indent + fmt.Sprintf("intVal, err := strconv.ParseInt(%s, 10, 64)\n", valName))
+		builder.WriteString(indent + fmt.Sprintf("intVal, err := strconv.ParseInt(%s, 10, %d)\n", valName, fieldType.Bits()))
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
 		builder.WriteString(indent + "if intVal != 0 {\n") // 检查是否为零值
 		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(intVal)\n", fieldName, typeName))
 		builder.WriteString(indent + "}\n")
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		builder.WriteString(indent + fmt.Sprintf("uintVal, err := strconv.ParseUint(%s, 10, 64)\n", valName))
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		builder.WriteString(indent + fmt.Sprintf("uintVal, err := strconv.ParseUint(%s, 10, %d)\n", valName, fieldType.Bits()))
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
@@ -882,7 +874,7 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(uintVal)\n", fieldName, typeName))
 		builder.WriteString(indent + "}\n")
 	case reflect.Float32, reflect.Float64:
-		builder.WriteString(indent + fmt.Sprintf("floatVal, err := strconv.ParseFloat(%s, 64)\n", valName))
+		builder.WriteString(indent + fmt.Sprintf("floatVal, err := strconv.ParseFloat(%s, %d)\n", valName, fieldType.Bits()))
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
@@ -1004,6 +996,7 @@ func generateFileContent(pkgPath string, apis []RouterHandler) (string, error) {
 
 	// 动态检查使用的包
 	usedImports := map[string]bool{
+		"bytes":                     false,
 		"encoding/json":             false,
 		"errors":                    false,
 		"fmt":                       false,
@@ -1017,6 +1010,7 @@ func generateFileContent(pkgPath string, apis []RouterHandler) (string, error) {
 	}
 
 	usedImportsSort := []string{
+		"bytes",
 		"encoding/json",
 		"errors",
 		"fmt",
@@ -1150,6 +1144,9 @@ func generateFileContent(pkgPath string, apis []RouterHandler) (string, error) {
 }
 
 func markUsedImports(method string, usedImports map[string]bool) {
+	if strings.Contains(method, "bytes.") {
+		usedImports["bytes"] = true
+	}
 	if strings.Contains(method, "errors.") {
 		usedImports["errors"] = true
 	}
@@ -1407,19 +1404,19 @@ func generateTypeConversion(builder *strings.Builder, fieldName, valName, paramN
 		// 对于字符串类型的别名，直接赋值
 		builder.WriteString(indent + fmt.Sprintf("%s = %s(%s)\n", fieldName, typeName, valName))
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		builder.WriteString(indent + fmt.Sprintf("intVal, err := strconv.ParseInt(%s, 10, 64)\n", valName))
+		builder.WriteString(indent + fmt.Sprintf("intVal, err := strconv.ParseInt(%s, 10, %d)\n", valName, fieldType.Bits()))
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
 		builder.WriteString(indent + fmt.Sprintf("%s = %s(intVal)\n", fieldName, typeName))
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		builder.WriteString(indent + fmt.Sprintf("uintVal, err := strconv.ParseUint(%s, 10, 64)\n", valName))
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		builder.WriteString(indent + fmt.Sprintf("uintVal, err := strconv.ParseUint(%s, 10, %d)\n", valName, fieldType.Bits()))
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
 		builder.WriteString(indent + fmt.Sprintf("%s = %s(uintVal)\n", fieldName, typeName))
 	case reflect.Float32, reflect.Float64:
-		builder.WriteString(indent + fmt.Sprintf("floatVal, err := strconv.ParseFloat(%s, 64)\n", valName))
+		builder.WriteString(indent + fmt.Sprintf("floatVal, err := strconv.ParseFloat(%s, %d)\n", valName, fieldType.Bits()))
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
@@ -1437,44 +1434,6 @@ func generateTypeConversion(builder *strings.Builder, fieldName, valName, paramN
 	return nil
 }
 
-// addZeroValueCheck 根据字段类型添加零值检查
-func addZeroValueCheck(builder *strings.Builder, valName string, fieldType reflect.Type) {
-	// 处理指针类型
-	if fieldType.Kind() == reflect.Ptr {
-		fieldType = fieldType.Elem()
-	}
-
-	// 获取底层类型
-	underlyingType := fieldType
-	for underlyingType.Kind() == reflect.Ptr || underlyingType.Kind() == reflect.Interface {
-		underlyingType = underlyingType.Elem()
-	}
-
-	// 根据底层类型添加零值检查
-	switch underlyingType.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		builder.WriteString(fmt.Sprintf("\t\tif %s == \"0\" {\n", valName))
-		builder.WriteString(fmt.Sprintf("\t\t\t%s = \"\"\n", valName))
-		builder.WriteString("\t\t}\n")
-	case reflect.Float32, reflect.Float64:
-		builder.WriteString(fmt.Sprintf("\t\ttempVal, err := strconv.ParseFloat(%s, 64)\n", valName))
-		builder.WriteString("\t\tif err == nil && tempVal == 0.0 {\n")
-		builder.WriteString(fmt.Sprintf("\t\t\t%s = \"\"\n", valName))
-		builder.WriteString("\t\t}\n")
-	case reflect.Bool:
-		builder.WriteString(fmt.Sprintf("\t\tif %s == \"false\" {\n", valName))
-		builder.WriteString(fmt.Sprintf("\t\t\t%s = \"\"\n", valName))
-		builder.WriteString("\t\t}\n")
-	case reflect.Struct:
-		if underlyingType.String() == "time.Time" {
-			builder.WriteString(fmt.Sprintf("\t\tif strings.HasPrefix(%s, \"0000-00-00T00:00:00\") {\n", valName))
-			builder.WriteString(fmt.Sprintf("\t\t\t%s = \"\"\n", valName))
-			builder.WriteString("\t\t}\n")
-		}
-	}
-}
-
 // isDefaultValueValid 检查默认值是否与字段类型匹配
 func isDefaultValueValid(defaultValue string, fieldType reflect.Type) bool {
 	for fieldType.Kind() == reflect.Ptr {
@@ -1489,13 +1448,13 @@ func isDefaultValueValid(defaultValue string, fieldType reflect.Type) bool {
 	case reflect.String:
 		return true
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		_, err := strconv.ParseInt(defaultValue, 10, 64)
+		_, err := strconv.ParseInt(defaultValue, 10, fieldType.Bits())
 		return err == nil
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		_, err := strconv.ParseUint(defaultValue, 10, 64)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		_, err := strconv.ParseUint(defaultValue, 10, fieldType.Bits())
 		return err == nil
 	case reflect.Float32, reflect.Float64:
-		_, err := strconv.ParseFloat(defaultValue, 64)
+		_, err := strconv.ParseFloat(defaultValue, fieldType.Bits())
 		return err == nil
 	case reflect.Bool:
 		_, err := strconv.ParseBool(defaultValue)

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -51,6 +52,38 @@ func TestAnyRouteIsAvailableFromContext(t *testing.T) {
 	}
 	if body := recorder.Body.String(); body != "route-ok" {
 		t.Fatalf("body = %q, want %q", body, "route-ok")
+	}
+}
+
+// TestRunOpenAPICommandReturnsGenerateError 确认 openapi 命令会把生成错误返回给调用方。
+func TestRunOpenAPICommandReturnsGenerateError(t *testing.T) {
+	prevArgs := os.Args
+	os.Args = []string{"easygin", "openapi"}
+	t.Cleanup(func() {
+		os.Args = prevArgs
+	})
+
+	prevDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	tempDir := t.TempDir()
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("chdir temp dir: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(prevDir); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	})
+
+	if err := os.Mkdir("openapi.json", 0o755); err != nil {
+		t.Fatalf("create blocking openapi.json directory: %v", err)
+	}
+
+	s := NewServer("test", ":0", false)
+	if err := s.Run(NewRouterGroup("/")); err == nil {
+		t.Fatal("expected openapi generation error to be returned")
 	}
 }
 

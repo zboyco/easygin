@@ -98,21 +98,30 @@ func setFieldValue(fieldValue reflect.Value, val string, tagName string, fieldTy
 	case reflect.String:
 		fieldValue.SetString(val)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		intVal, err := strconv.ParseInt(val, 10, 64)
+		intVal, err := strconv.ParseInt(val, 10, fieldType.Bits())
 		if err != nil {
 			return fmt.Errorf("invalid parameter '%s': %w", tagName, err)
 		}
+		if fieldValue.OverflowInt(intVal) {
+			return fmt.Errorf("invalid parameter '%s': value %q overflows %s", tagName, val, fieldType)
+		}
 		fieldValue.SetInt(intVal)
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		uintVal, err := strconv.ParseUint(val, 10, 64)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		uintVal, err := strconv.ParseUint(val, 10, fieldType.Bits())
 		if err != nil {
 			return fmt.Errorf("invalid parameter '%s': %w", tagName, err)
+		}
+		if fieldValue.OverflowUint(uintVal) {
+			return fmt.Errorf("invalid parameter '%s': value %q overflows %s", tagName, val, fieldType)
 		}
 		fieldValue.SetUint(uintVal)
 	case reflect.Float32, reflect.Float64:
-		floatVal, err := strconv.ParseFloat(val, 64)
+		floatVal, err := strconv.ParseFloat(val, fieldType.Bits())
 		if err != nil {
 			return fmt.Errorf("invalid parameter '%s': %w", tagName, err)
+		}
+		if fieldValue.OverflowFloat(floatVal) {
+			return fmt.Errorf("invalid parameter '%s': value %q overflows %s", tagName, val, fieldType)
 		}
 		fieldValue.SetFloat(floatVal)
 	case reflect.Bool:

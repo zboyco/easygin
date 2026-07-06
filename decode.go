@@ -1,6 +1,7 @@
 package easygin
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,8 +25,12 @@ type bodyFieldInfo struct {
 
 // decodeJSON 从请求中解析JSON数据并验证必填字段
 func decodeJSON(r io.Reader, v any) error {
-	// 使用json.NewDecoder避免额外的内存分配
-	decoder := json.NewDecoder(r)
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("read json failed: %v", err)
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	if err := decoder.Decode(v); err != nil {
 		return fmt.Errorf("parse json failed: %v", err)
 	}
@@ -41,7 +46,7 @@ func decodeJSON(r io.Reader, v any) error {
 	}
 
 	// 验证必填字段
-	return ValidateJsonRequiredFields(reflect.ValueOf(v))
+	return ValidateJsonRequiredFieldsWithRaw(reflect.ValueOf(v), body)
 }
 
 // handleEmptyValue 处理字段值为空的情况，检查omitempty和default标签
@@ -91,6 +96,16 @@ func isEmptyValue(v reflect.Value) bool {
 	return IsZeroValue(v)
 }
 
+// typeCachePath 返回适合标签解析缓存使用的类型标识。
+//
+// 命名类型使用包路径和类型名；匿名结构体使用结构描述，避免多个匿名结构体共享空 key。
+func typeCachePath(t reflect.Type) string {
+	if t.PkgPath() != "" || t.Name() != "" {
+		return t.PkgPath() + "." + t.Name()
+	}
+	return t.String()
+}
+
 // validateFieldsCache 用于缓存结构体字段的验证信息
 var validateFieldsCache sync.Map
 
@@ -101,17 +116,17 @@ type validateFieldInfo struct {
 	defaultValue string
 	jsonName     string
 	isStruct     bool
+	anonymous    bool
 }
 
 // getValidateFields 获取并缓存结构体的验证字段信息
 func getValidateFields(t reflect.Type) []validateFieldInfo {
-	// 在缓存key中加入结构体类型信息，避免不同结构体中相同字段名导致的key重复
-	structPath := t.PkgPath() + "." + t.Name()
-
 	// 尝试从缓存获取
-	if cached, ok := validateFieldsCache.Load(structPath); ok {
+	if cached, ok := validateFieldsCache.Load(t); ok {
 		return cached.([]validateFieldInfo)
 	}
+
+	structPath := typeCachePath(t)
 
 	// 缓存未命中，解析字段信息
 	fields := make([]validateFieldInfo, 0, t.NumField())
@@ -132,16 +147,37 @@ func getValidateFields(t reflect.Type) []validateFieldInfo {
 			defaultValue: defaultValue,
 			jsonName:     jsonName,
 			isStruct:     isStruct,
+			anonymous:    field.Anonymous,
 		})
 	}
 
 	// 存入缓存
-	validateFieldsCache.Store(structPath, fields)
+	validateFieldsCache.Store(t, fields)
 	return fields
 }
 
-// validateRequiredFields 递归验证结构体的必填字段
+// ValidateJsonRequiredFields 递归验证结构体的必填字段。
+//
+// 该函数无法区分 JSON 字段缺失和显式零值，保留旧反射语义以兼容直接调用者。
+// 新的 JSON body 绑定应优先使用 ValidateJsonRequiredFieldsWithRaw。
 func ValidateJsonRequiredFields(v reflect.Value) error {
+	return validateJsonRequiredFields(v, nil, false)
+}
+
+// ValidateJsonRequiredFieldsWithRaw 根据原始 JSON 字段出现情况验证必填字段并应用默认值。
+//
+// 参数:
+//   - v: 已反序列化后的目标值，通常是结构体或结构体指针。
+//   - raw: 与 v 对应的原始 JSON 对象字节。
+//
+// 返回值:
+//   - error: 当必填字段缺失、默认值转换失败或原始 JSON 无法解析时返回错误。
+func ValidateJsonRequiredFieldsWithRaw(v reflect.Value, raw []byte) error {
+	return validateJsonRequiredFields(v, json.RawMessage(raw), true)
+}
+
+// validateJsonRequiredFields 按反射信息递归验证 JSON body 字段。
+func validateJsonRequiredFields(v reflect.Value, raw json.RawMessage, usePresence bool) error {
 	// 处理指针类型，添加安全检查
 	for {
 		if v.Kind() == reflect.Ptr {
@@ -162,13 +198,43 @@ func ValidateJsonRequiredFields(v reflect.Value) error {
 	// 获取类型信息和缓存的字段信息
 	t := v.Type()
 	fields := getValidateFields(t)
+	var rawFields map[string]json.RawMessage
+	if usePresence {
+		var err error
+		rawFields, err = jsonObjectFields(raw)
+		if err != nil {
+			return err
+		}
+	}
 
 	// 遍历字段信息
 	for _, info := range fields {
 		fieldValue := v.Field(info.index)
+		if usePresence {
+			if info.anonymous && info.jsonName == "" && info.isStruct {
+				if err := validateJsonRequiredFields(fieldValue, raw, true); err != nil {
+					return err
+				}
+				continue
+			}
+			if info.jsonName == "" || info.jsonName == "-" {
+				continue
+			}
+		}
 
 		// 处理结构体类型字段（包括指针类型的结构体）
 		if info.isStruct {
+			var nestedRaw json.RawMessage
+			if usePresence {
+				var ok bool
+				nestedRaw, ok = rawFields[info.jsonName]
+				if !ok || isJSONNull(nestedRaw) {
+					if !info.canBeEmpty {
+						return fmt.Errorf("missing required field '%s' in body", info.jsonName)
+					}
+					continue
+				}
+			}
 			// 如果是指针类型
 			if fieldValue.Kind() == reflect.Ptr {
 				// 如果指针为nil且字段不能为空，返回错误
@@ -187,8 +253,24 @@ func ValidateJsonRequiredFields(v reflect.Value) error {
 				}
 			}
 			// 无论字段是否可以为空，只要不为nil就需要递归验证其内部字段
-			if err := ValidateJsonRequiredFields(fieldValue); err != nil {
+			if err := validateJsonRequiredFields(fieldValue, nestedRaw, usePresence); err != nil {
 				return err
+			}
+			continue
+		}
+
+		if usePresence {
+			fieldRaw, ok := rawFields[info.jsonName]
+			if ok && !isJSONNull(fieldRaw) {
+				continue
+			}
+			if !info.canBeEmpty {
+				return fmt.Errorf("missing required field '%s' in body", info.jsonName)
+			}
+			if info.defaultValue != "" {
+				if err := setFieldValue(fieldValue, info.defaultValue, info.jsonName, fieldValue.Type()); err != nil {
+					return err
+				}
 			}
 			continue
 		}
@@ -210,26 +292,39 @@ func ValidateJsonRequiredFields(v reflect.Value) error {
 	return nil
 }
 
+// jsonObjectFields 将原始 JSON 对象解析为字段映射。
+func jsonObjectFields(raw json.RawMessage) (map[string]json.RawMessage, error) {
+	if len(bytes.TrimSpace(raw)) == 0 || isJSONNull(raw) {
+		return nil, nil
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, fmt.Errorf("parse json fields failed: %v", err)
+	}
+	return fields, nil
+}
+
+// isJSONNull 判断原始 JSON 值是否为 null。
+func isJSONNull(raw json.RawMessage) bool {
+	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+}
+
 // handleFormFieldValue 统一处理表单字段值的验证和设置
 func handleFormFieldValue(field reflect.StructField, fieldVal reflect.Value, value, name, structPath string) error {
 	// 如果值不为空，先尝试设置字段值
 	if value != "" {
-		if err := setFieldValue(fieldVal, value, name, field.Type); err != nil {
-			return err
-		}
+		return setFieldValue(fieldVal, value, name, field.Type)
 	}
 
-	// 检查设置后的值是否为空
-	if value == "" || isEmptyValue(fieldVal) {
-		canBeEmpty, defaultValue := handleEmptyValue(structPath, field, "name")
-		if !canBeEmpty {
-			return fmt.Errorf("missing required parameter '%s' in form", name)
-		}
-		// 如果有默认值，设置默认值
-		if defaultValue != "" {
-			if err := setFieldValue(fieldVal, defaultValue, name, field.Type); err != nil {
-				return err
-			}
+	canBeEmpty, defaultValue := handleEmptyValue(structPath, field, "name")
+	if !canBeEmpty {
+		return fmt.Errorf("missing required parameter '%s' in form", name)
+	}
+	// 如果有默认值，设置默认值
+	if defaultValue != "" {
+		if err := setFieldValue(fieldVal, defaultValue, name, field.Type); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -277,13 +372,12 @@ type formFieldInfo struct {
 
 // getFormFields 获取并缓存结构体的表单字段信息
 func getFormFields(t reflect.Type) []formFieldInfo {
-	// 在缓存key中加入结构体类型信息，避免不同结构体中相同字段名导致的key重复
-	structPath := t.PkgPath() + "." + t.Name()
-
 	// 尝试从缓存获取
-	if cached, ok := formFieldCache.Load(structPath); ok {
+	if cached, ok := formFieldCache.Load(t); ok {
 		return cached.([]formFieldInfo)
 	}
+
+	structPath := typeCachePath(t)
 
 	// 缓存未命中，解析字段信息
 	fields := make([]formFieldInfo, 0, t.NumField())
@@ -323,7 +417,7 @@ func getFormFields(t reflect.Type) []formFieldInfo {
 	}
 
 	// 存入缓存
-	formFieldCache.Store(structPath, fields)
+	formFieldCache.Store(t, fields)
 	return fields
 }
 

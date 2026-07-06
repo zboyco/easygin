@@ -89,7 +89,10 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 
 	// 处理生成OpenAPI文档的命令
 	if len(args) > 1 && args[1] == "openapi" {
-		GenerateOpenAPI(groups...)
+		if err := GenerateOpenAPI(groups...); err != nil {
+			fmt.Fprintf(os.Stderr, "[EasyGin] generate OpenAPI failed: %v\n", err)
+			return err
+		}
 		return nil
 	}
 

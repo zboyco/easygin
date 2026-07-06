@@ -6,7 +6,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -20,6 +22,129 @@ func TestDecodeJSONRejectsMultipleJSONValues(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "multiple JSON values are not allowed") {
 		t.Fatalf("expected multiple JSON values error, got: %v", err)
+	}
+}
+
+// TestDecodeJSONRequiredAllowsExplicitZeroValues 验证 JSON 中显式提供的零值不应被当作缺失字段。
+func TestDecodeJSONRequiredAllowsExplicitZeroValues(t *testing.T) {
+	prev := HandleBodyJsonOmitEmptyAndDefault()
+	SetHandleBodyJsonOmitEmptyAndDefault(true)
+	t.Cleanup(func() {
+		SetHandleBodyJsonOmitEmptyAndDefault(prev)
+	})
+
+	type payload struct {
+		Count   int     `json:"count"`
+		Enabled bool    `json:"enabled"`
+		Ratio   float64 `json:"ratio"`
+	}
+
+	var got payload
+	err := decodeJSON(strings.NewReader(`{"count":0,"enabled":false,"ratio":0}`), &got)
+	if err != nil {
+		t.Fatalf("explicit zero values should be accepted as present fields, got error: %v", err)
+	}
+}
+
+// TestValidateJsonRequiredFieldsAnonymousStructCacheIsolation 验证匿名结构体不会复用错误的验证字段缓存。
+func TestValidateJsonRequiredFieldsAnonymousStructCacheIsolation(t *testing.T) {
+	validateFieldsCache = sync.Map{}
+	fieldCache = sync.Map{}
+	t.Cleanup(func() {
+		validateFieldsCache = sync.Map{}
+		fieldCache = sync.Map{}
+	})
+
+	var first struct {
+		Name string `json:"name"`
+	}
+	if err := ValidateJsonRequiredFieldsWithRaw(reflect.ValueOf(&first), []byte(`{"name":"alice"}`)); err != nil {
+		t.Fatalf("first anonymous struct validation failed: %v", err)
+	}
+
+	var second struct {
+		ID      int  `json:"id"`
+		Enabled bool `json:"enabled"`
+	}
+	if err := ValidateJsonRequiredFieldsWithRaw(reflect.ValueOf(&second), []byte(`{"id":1,"enabled":false}`)); err != nil {
+		t.Fatalf("second anonymous struct should use its own cached fields, got: %v", err)
+	}
+}
+
+// TestDecodeMultipartFormRequiredAllowsExplicitZeroValues 验证 multipart/form 显式零值不应被当作缺失字段。
+func TestDecodeMultipartFormRequiredAllowsExplicitZeroValues(t *testing.T) {
+	type payload struct {
+		Count   int     `name:"count"`
+		Enabled bool    `name:"enabled"`
+		Ratio   float64 `name:"ratio"`
+	}
+
+	var got payload
+	form := &multipart.Form{
+		Value: map[string][]string{
+			"count":   {"0"},
+			"enabled": {"false"},
+			"ratio":   {"0"},
+		},
+	}
+
+	if err := decodeMultipartForm(form, &got); err != nil {
+		t.Fatalf("explicit zero values should be accepted as present form fields, got error: %v", err)
+	}
+}
+
+// TestSetFieldValueRejectsNarrowIntegerOverflow 验证窄数值类型溢出应返回错误而不是 panic 或截断。
+func TestSetFieldValueRejectsNarrowIntegerOverflow(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		field reflect.Value
+	}{
+		{
+			name:  "int8",
+			value: "128",
+			field: func() reflect.Value {
+				var holder struct {
+					N int8
+				}
+				return reflect.ValueOf(&holder).Elem().Field(0)
+			}(),
+		},
+		{
+			name:  "uint8",
+			value: "256",
+			field: func() reflect.Value {
+				var holder struct {
+					N uint8
+				}
+				return reflect.ValueOf(&holder).Elem().Field(0)
+			}(),
+		},
+		{
+			name:  "float32",
+			value: "3.5e39",
+			field: func() reflect.Value {
+				var holder struct {
+					N float32
+				}
+				return reflect.ValueOf(&holder).Elem().Field(0)
+			}(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("setFieldValue should return an overflow error instead of panicking: %v", recovered)
+				}
+			}()
+
+			err := setFieldValue(tt.field, tt.value, "n", tt.field.Type())
+			if err == nil {
+				t.Fatalf("expected overflow error for %s, got nil", tt.field.Type())
+			}
+		})
 	}
 }
 

@@ -331,17 +331,7 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, 
 					doc.Paths.Set(apiPath, pathItem)
 				}
 
-				// 设置操作
-				switch method {
-				case "get":
-					pathItem.Get = op
-				case "post":
-					pathItem.Post = op
-				case "put":
-					pathItem.Put = op
-				case "delete":
-					pathItem.Delete = op
-				}
+				setPathItemOperation(pathItem, method, op)
 
 				// 添加中间件参数到操作中
 				if len(middlewareParams) > 0 {
@@ -363,6 +353,40 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, 
 	}
 
 	return nil
+}
+
+// setPathItemOperation 将 easygin 方法名映射到 OpenAPI PathItem。
+func setPathItemOperation(pathItem *openapi3.PathItem, method string, op *openapi3.Operation) {
+	switch method {
+	case "get":
+		pathItem.Get = op
+	case "post":
+		pathItem.Post = op
+	case "put":
+		pathItem.Put = op
+	case "delete":
+		pathItem.Delete = op
+	case "patch":
+		pathItem.Patch = op
+	case "head":
+		pathItem.Head = op
+	case "options":
+		pathItem.Options = op
+	case "connect":
+		pathItem.Connect = op
+	case "trace":
+		pathItem.Trace = op
+	case "any":
+		pathItem.Get = op
+		pathItem.Post = op
+		pathItem.Put = op
+		pathItem.Delete = op
+		pathItem.Patch = op
+		pathItem.Head = op
+		pathItem.Options = op
+		pathItem.Connect = op
+		pathItem.Trace = op
+	}
 }
 
 // 处理结构体字段，包括嵌入字段
