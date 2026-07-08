@@ -46,7 +46,7 @@
 - 功能: 处理结构体字段，提取 API 参数信息
 - 处理内容:
   1. 处理嵌入字段：`in:"body"` 直接生成请求体，其余 `in` 标签按普通字段处理；无 `in` 标签的嵌入 struct 会递归展开
-  2. 处理带有 `in` 标签的字段，支持 `desc` 描述和 `omitempty` 控制必填
+  2. 处理带有 `in` 标签的字段，支持 `desc` 描述和 `omitempty` 控制 OpenAPI required 标记；required 表示参数必须出现，不表示值必须非空或非零
   3. `mime:"multipart"` 会将请求体 content-type 设置为 `multipart/form-data`，并在 Schema 生成时以表单字段名解析
   4. 防止循环引用的处理，复用 `processedTypes` 映射
 
@@ -65,7 +65,7 @@
 - 签名: `func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3.Schema`
 - 功能: 根据 Go 类型生成 OpenAPI Schema 值
 - 特性:
-  1. 处理结构体 (对象)，嵌入字段的属性与必填信息会合并到父级；支持 `desc` 描述
+  1. 处理结构体 (对象)，嵌入字段的属性与必填信息会合并到父级；支持 `desc` 描述；必填信息同样表示字段必须出现
   2. 基本类型 (字符串、整数、浮点数、布尔值)
   3. 数组和切片（遇到正在处理的组件时使用 `$ref` 避免循环）
   4. Map 类型（仅允许字符串键，否则 panic 提示）

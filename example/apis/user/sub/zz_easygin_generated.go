@@ -12,14 +12,12 @@ import (
 func (r *ListSub) EasyGinBindParameters(c *gin.Context) error {
 	// 绑定查询参数 size
 	{
-		queryVal := c.Query("size")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("size")
+		if !queryOK {
 			queryVal = "10"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			intVal, err := strconv.ParseInt(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'size': %v", err.Error())
@@ -29,14 +27,12 @@ func (r *ListSub) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 offset
 	{
-		queryVal := c.Query("offset")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("offset")
+		if !queryOK {
 			queryVal = "0"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			intVal, err := strconv.ParseInt(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'offset': %v", err.Error())

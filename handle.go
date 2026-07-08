@@ -69,12 +69,6 @@ func parseTime(val string, tagName string) (time.Time, error) {
 func setFieldValue(fieldValue reflect.Value, val string, tagName string, fieldType reflect.Type) error {
 	// 处理指针类型
 	if fieldType.Kind() == reflect.Ptr {
-		// 如果值为空，则设置为nil
-		if val == "" {
-			fieldValue.Set(reflect.Zero(fieldType))
-			return nil
-		}
-
 		// 创建新的指针并设置值
 		ptrValue := reflect.New(fieldType.Elem())
 		if err := setFieldValue(ptrValue.Elem(), val, tagName, fieldType.Elem()); err != nil {
@@ -323,17 +317,29 @@ func bindParams(c *gin.Context, h RouterHandler) (RouterHandler, error) {
 				continue
 			}
 
-			var val string
+			var (
+				val     string
+				present bool
+			)
 			switch info.tagType {
 			case "query":
-				val = c.Query(info.tagName)
+				val, present = c.GetQuery(info.tagName)
 			case "path":
 				val = c.Param(info.tagName)
+				present = val != ""
 			case "header":
-				val = c.GetHeader(info.tagName)
+				headerKey := http.CanonicalHeaderKey(info.tagName)
+				headerVals, ok := c.Request.Header[headerKey]
+				if !ok && headerKey != info.tagName {
+					headerVals, ok = c.Request.Header[info.tagName]
+				}
+				present = ok
+				if len(headerVals) > 0 {
+					val = headerVals[0]
+				}
 			}
 
-			if val == "" {
+			if !present {
 				if !slices.Contains(info.tagNames, "omitempty") {
 					return nil, fmt.Errorf("missing required parameter '%s' in %s", info.tagName, info.tagType)
 				}

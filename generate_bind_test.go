@@ -76,8 +76,40 @@ func TestGenerateQueryBindingOptionalDefault(t *testing.T) {
 	if !strings.Contains(output, `queryVal = "anonymous"`) {
 		t.Fatalf("expected default value assignment, got:\n%s", output)
 	}
+	if !strings.Contains(output, `queryVal, queryOK := c.GetQuery("name")`) {
+		t.Fatalf("expected query presence check, got:\n%s", output)
+	}
+	if !strings.Contains(output, `if !queryOK {`) || !strings.Contains(output, `queryOK = true`) {
+		t.Fatalf("expected default to be applied only when query is missing, got:\n%s", output)
+	}
+	if strings.Contains(output, `if queryVal == ""`) {
+		t.Fatalf("query default should not be based on empty string, got:\n%s", output)
+	}
 	if strings.Contains(output, `missing required parameter 'name' in query`) {
 		t.Fatalf("omitempty field should not generate required error, got:\n%s", output)
+	}
+}
+
+func TestGenerateHeaderBindingPresenceDefault(t *testing.T) {
+	type headerStruct struct {
+		Trace string `in:"header" name:"X-Trace,omitempty" default:"trace"`
+	}
+	field := reflect.TypeOf(headerStruct{}).Field(0)
+
+	var builder strings.Builder
+	if err := generateHeaderBinding(&builder, "r.Trace", "X-Trace", field, reflect.TypeOf(headerStruct{}).PkgPath(), nil); err != nil {
+		t.Fatalf("generateHeaderBinding returned error: %v", err)
+	}
+	output := builder.String()
+
+	if !strings.Contains(output, `http.CanonicalHeaderKey("X-Trace")`) {
+		t.Fatalf("expected canonical header presence check, got:\n%s", output)
+	}
+	if !strings.Contains(output, `if !headerOK {`) || !strings.Contains(output, `headerOK = true`) {
+		t.Fatalf("expected default to be applied only when header is missing, got:\n%s", output)
+	}
+	if strings.Contains(output, `if headerVal == ""`) {
+		t.Fatalf("header default should not be based on empty string, got:\n%s", output)
 	}
 }
 
@@ -108,6 +140,25 @@ func TestGenerateQueryBindingPreservesExplicitZeroValues(t *testing.T) {
 				t.Fatalf("generated binding treats explicit zero value as missing:\n%s", output)
 			}
 		})
+	}
+}
+
+func TestGenerateValueConversionAssignsZeroValues(t *testing.T) {
+	type queryParams struct {
+		Count   int  `in:"query" name:"count"`
+		Enabled bool `in:"query" name:"enabled"`
+	}
+
+	for i := 0; i < reflect.TypeOf(queryParams{}).NumField(); i++ {
+		field := reflect.TypeOf(queryParams{}).Field(i)
+		var builder strings.Builder
+		if err := generateQueryBinding(&builder, "r."+field.Name, strings.Split(field.Tag.Get("name"), ",")[0], field, reflect.TypeOf(queryParams{}).PkgPath(), nil); err != nil {
+			t.Fatalf("generateQueryBinding returned error: %v", err)
+		}
+		output := builder.String()
+		if strings.Contains(output, "if intVal != 0") || strings.Contains(output, "if boolVal {") {
+			t.Fatalf("generated binding should assign parsed zero values directly:\n%s", output)
+		}
 	}
 }
 
@@ -331,8 +382,31 @@ func TestGenerateBodyBindingMultipartForm(t *testing.T) {
 	if !strings.Contains(output, `return errors.New("missing required file 'upload'")`) {
 		t.Fatalf("expected required file error, got:\n%s", output)
 	}
-	if !strings.Contains(output, `c.PostFormArray("tags")`) {
+	if !strings.Contains(output, `values, valuesOK := c.Request.MultipartForm.Value["tags"]`) {
 		t.Fatalf("expected slice form binding, got:\n%s", output)
+	}
+}
+
+func TestGenerateFormBindingPresenceDefault(t *testing.T) {
+	type formStruct struct {
+		Name string `name:"name,omitempty" default:"anonymous"`
+	}
+	field := reflect.TypeOf(formStruct{}).Field(0)
+
+	var builder strings.Builder
+	if err := generateFormBinding(&builder, "r.Name", "name", field, reflect.TypeOf(formStruct{}).PkgPath(), nil); err != nil {
+		t.Fatalf("generateFormBinding returned error: %v", err)
+	}
+	output := builder.String()
+
+	if !strings.Contains(output, `formVals, formOK := c.Request.MultipartForm.Value["name"]`) {
+		t.Fatalf("expected form presence check, got:\n%s", output)
+	}
+	if !strings.Contains(output, `if !formOK {`) || !strings.Contains(output, `formOK = true`) {
+		t.Fatalf("expected default to be applied only when form field is missing, got:\n%s", output)
+	}
+	if strings.Contains(output, `if formVal == ""`) {
+		t.Fatalf("form default should not be based on empty string, got:\n%s", output)
 	}
 }
 
@@ -358,6 +432,7 @@ func TestGenerateFileContentDedupAndImports(t *testing.T) {
 		"\"encoding/json\"",
 		"\"errors\"",
 		"\"fmt\"",
+		"\"net/http\"",
 		"\"reflect\"",
 		"\"strconv\"",
 		"\"time\"",

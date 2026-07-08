@@ -276,10 +276,10 @@ func generateQueryBinding(builder *strings.Builder, fieldName, paramName string,
 		return fmt.Errorf("unsupported query slice parameter type %q for field %s", fieldType.String(), fieldName)
 	}
 
-	builder.WriteString(fmt.Sprintf("\t\tqueryVal := c.Query(\"%s\")\n", paramName))
+	builder.WriteString(fmt.Sprintf("\t\tqueryVal, queryOK := c.GetQuery(\"%s\")\n", paramName))
 
 	if !isOmitempty {
-		builder.WriteString("\t\tif queryVal == \"\" {\n")
+		builder.WriteString("\t\tif !queryOK {\n")
 		builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required parameter '%s' in query\")\n", paramName))
 		builder.WriteString("\t\t}\n")
 	} else {
@@ -287,8 +287,9 @@ func generateQueryBinding(builder *strings.Builder, fieldName, paramName string,
 		defaultValue := field.Tag.Get("default")
 		if defaultValue != "" {
 			if isDefaultValueValid(defaultValue, field.Type) {
-				builder.WriteString("\t\tif queryVal == \"\" {\n")
+				builder.WriteString("\t\tif !queryOK {\n")
 				builder.WriteString(fmt.Sprintf("\t\t\tqueryVal = \"%s\"\n", defaultValue))
+				builder.WriteString("\t\t\tqueryOK = true\n")
 				builder.WriteString("\t\t}\n")
 			} else {
 				return fmt.Errorf("default value %q does not match the field type for parameter %q", defaultValue, paramName)
@@ -296,7 +297,7 @@ func generateQueryBinding(builder *strings.Builder, fieldName, paramName string,
 		}
 	}
 
-	builder.WriteString("\t\tif queryVal != \"\" {\n")
+	builder.WriteString("\t\tif queryOK {\n")
 	if field.Type.Name() != "" {
 		if err := generateTypeConversion(builder, fieldName, "queryVal", paramName, field.Type, "\t\t\t", currentPkgPath, pkgAliases); err != nil {
 			return err
@@ -511,7 +512,15 @@ func isFloatKind(kind reflect.Kind) bool {
 func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string, pkgAliases map[string]string) error {
 	builder.WriteString(fmt.Sprintf("\t// 绑定头部参数 %s\n", paramName))
 	builder.WriteString("\t{\n") // 添加代码块开始
-	builder.WriteString(fmt.Sprintf("\t\theaderVal := c.GetHeader(\"%s\")\n", paramName))
+	builder.WriteString(fmt.Sprintf("\t\theaderKey := http.CanonicalHeaderKey(\"%s\")\n", paramName))
+	builder.WriteString("\t\theaderVals, headerOK := c.Request.Header[headerKey]\n")
+	builder.WriteString(fmt.Sprintf("\t\tif !headerOK && headerKey != \"%s\" {\n", paramName))
+	builder.WriteString(fmt.Sprintf("\t\t\theaderVals, headerOK = c.Request.Header[\"%s\"]\n", paramName))
+	builder.WriteString("\t\t}\n")
+	builder.WriteString("\t\theaderVal := \"\"\n")
+	builder.WriteString("\t\tif len(headerVals) > 0 {\n")
+	builder.WriteString("\t\t\theaderVal = headerVals[0]\n")
+	builder.WriteString("\t\t}\n")
 
 	// 检查是否必填
 	tagNames := strings.Split(field.Tag.Get("name"), ",")
@@ -524,7 +533,7 @@ func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string
 	}
 
 	if !isOmitempty {
-		builder.WriteString("\t\tif headerVal == \"\" {\n")
+		builder.WriteString("\t\tif !headerOK {\n")
 		builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required parameter '%s' in header\")\n", paramName))
 		builder.WriteString("\t\t}\n")
 	} else {
@@ -532,8 +541,9 @@ func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string
 		defaultValue := field.Tag.Get("default")
 		if defaultValue != "" {
 			if isDefaultValueValid(defaultValue, field.Type) {
-				builder.WriteString("\t\tif headerVal == \"\" {\n")
+				builder.WriteString("\t\tif !headerOK {\n")
 				builder.WriteString(fmt.Sprintf("\t\t\theaderVal = \"%s\"\n", defaultValue))
+				builder.WriteString("\t\t\theaderOK = true\n")
 				builder.WriteString("\t\t}\n")
 			} else {
 				return fmt.Errorf("default value %q does not match the field type for parameter %q", defaultValue, paramName)
@@ -541,7 +551,7 @@ func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string
 		}
 	}
 
-	builder.WriteString("\t\tif headerVal != \"\" {\n")
+	builder.WriteString("\t\tif headerOK {\n")
 	if field.Type.Name() != "" {
 		if err := generateTypeConversion(builder, fieldName, "headerVal", paramName, field.Type, "\t\t\t", currentPkgPath, pkgAliases); err != nil {
 			return err
@@ -697,11 +707,7 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 
 	// 判断字段类型
 	if field.Type.String() == "*multipart.FileHeader" {
-		if isOmitempty {
-			builder.WriteString(fmt.Sprintf("\t\tif file, ok := c.Request.MultipartForm.File[\"%s\"]; ok {\n", paramName))
-		} else {
-			builder.WriteString(fmt.Sprintf("\t\tif file, ok := c.Request.MultipartForm.File[\"%s\"]; ok && len(file) > 0 {\n", paramName))
-		}
+		builder.WriteString(fmt.Sprintf("\t\tif file, ok := c.Request.MultipartForm.File[\"%s\"]; ok && len(file) > 0 {\n", paramName))
 		builder.WriteString(fmt.Sprintf("\t\t\t%s = file[0]\n", fieldName))
 		builder.WriteString("\t\t} else {\n")
 		if !isOmitempty {
@@ -709,11 +715,7 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 		}
 		builder.WriteString("\t\t}\n")
 	} else if field.Type.Kind() == reflect.Slice && field.Type.Elem().String() == "*multipart.FileHeader" {
-		if isOmitempty {
-			builder.WriteString(fmt.Sprintf("\t\tif files, ok := c.Request.MultipartForm.File[\"%s\"]; ok {\n", paramName))
-		} else {
-			builder.WriteString(fmt.Sprintf("\t\tif files, ok := c.Request.MultipartForm.File[\"%s\"]; ok && len(files) > 0 {\n", paramName))
-		}
+		builder.WriteString(fmt.Sprintf("\t\tif files, ok := c.Request.MultipartForm.File[\"%s\"]; ok && len(files) > 0 {\n", paramName))
 		builder.WriteString(fmt.Sprintf("\t\t\t%s = files\n", fieldName))
 		builder.WriteString("\t\t} else {\n")
 		if !isOmitempty {
@@ -722,29 +724,36 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 		builder.WriteString("\t\t}\n")
 	} else if field.Type.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.String {
 		// 处理字符串数组
-		builder.WriteString(fmt.Sprintf("\t\t%s = c.PostFormArray(\"%s\")\n", fieldName, paramName))
+		builder.WriteString(fmt.Sprintf("\t\tvalues, valuesOK := c.Request.MultipartForm.Value[\"%s\"]\n", paramName))
 		if !isOmitempty {
-			builder.WriteString(fmt.Sprintf("\t\tif len(%s) == 0 {\n", fieldName))
+			builder.WriteString("\t\tif !valuesOK {\n")
 			builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required parameter '%s' in form\")\n", paramName))
 			builder.WriteString("\t\t}\n")
 		}
+		builder.WriteString("\t\tif valuesOK {\n")
+		builder.WriteString(fmt.Sprintf("\t\t\t%s = values\n", fieldName))
+		builder.WriteString("\t\t}\n")
 	} else if field.Type.Kind() == reflect.Ptr && field.Type.Elem().Kind() == reflect.Slice && field.Type.Elem().Elem().Kind() == reflect.String {
 		// 处理字符串数组的指针
-		builder.WriteString(fmt.Sprintf("\t\tvalues := c.PostFormArray(\"%s\")\n", paramName))
+		builder.WriteString(fmt.Sprintf("\t\tvalues, valuesOK := c.Request.MultipartForm.Value[\"%s\"]\n", paramName))
 		if !isOmitempty {
-			builder.WriteString("\t\tif len(values) == 0 {\n")
+			builder.WriteString("\t\tif !valuesOK {\n")
 			builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required parameter '%s' in form\")\n", paramName))
 			builder.WriteString("\t\t}\n")
 		}
-		builder.WriteString("\t\tif len(values) > 0 {\n")
+		builder.WriteString("\t\tif valuesOK {\n")
 		builder.WriteString(fmt.Sprintf("\t\t\t%s = &values\n", fieldName))
 		builder.WriteString("\t\t}\n")
 	} else {
 		// 处理其他类型
-		builder.WriteString(fmt.Sprintf("\t\tformVal := c.PostForm(\"%s\")\n", paramName))
+		builder.WriteString(fmt.Sprintf("\t\tformVals, formOK := c.Request.MultipartForm.Value[\"%s\"]\n", paramName))
+		builder.WriteString("\t\tformVal := \"\"\n")
+		builder.WriteString("\t\tif len(formVals) > 0 {\n")
+		builder.WriteString("\t\t\tformVal = formVals[0]\n")
+		builder.WriteString("\t\t}\n")
 
 		if !isOmitempty {
-			builder.WriteString("\t\tif formVal == \"\" {\n")
+			builder.WriteString("\t\tif !formOK {\n")
 			builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required parameter '%s' in form\")\n", paramName))
 			builder.WriteString("\t\t}\n")
 		} else {
@@ -752,8 +761,9 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 			defaultValue := field.Tag.Get("default")
 			if defaultValue != "" {
 				if isDefaultValueValid(defaultValue, field.Type) {
-					builder.WriteString("\t\tif formVal == \"\" {\n")
+					builder.WriteString("\t\tif !formOK {\n")
 					builder.WriteString(fmt.Sprintf("\t\t\tformVal = \"%s\"\n", defaultValue))
+					builder.WriteString("\t\t\tformOK = true\n")
 					builder.WriteString("\t\t}\n")
 				} else {
 					return fmt.Errorf("default value %q does not match the field type for parameter %q", defaultValue, paramName)
@@ -761,7 +771,7 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 			}
 		}
 
-		builder.WriteString("\t\tif formVal != \"\" {\n")
+		builder.WriteString("\t\tif formOK {\n")
 		if field.Type.Name() != "" {
 			if err := generateTypeConversion(builder, fieldName, "formVal", paramName, field.Type, "\t\t\t", currentPkgPath, pkgAliases); err != nil {
 				return err
@@ -843,9 +853,7 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid time format for parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
-		builder.WriteString(indent + "if !t.IsZero() {\n") // 检查是否为零值
-		builder.WriteString(indent + fmt.Sprintf("\t%s = t\n", fieldName))
-		builder.WriteString(indent + "}\n")
+		builder.WriteString(indent + fmt.Sprintf("%s = t\n", fieldName))
 		return nil
 	}
 
@@ -854,41 +862,31 @@ func generateValueConversionForType(builder *strings.Builder, fieldName, valName
 	// 处理基本类型
 	switch fieldType.Kind() {
 	case reflect.String:
-		builder.WriteString(indent + fmt.Sprintf("if %s != \"\" {\n", valName))
-		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(%s)\n", fieldName, typeName, valName))
-		builder.WriteString(indent + "}\n")
+		builder.WriteString(indent + fmt.Sprintf("%s = %s(%s)\n", fieldName, typeName, valName))
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		builder.WriteString(indent + fmt.Sprintf("intVal, err := strconv.ParseInt(%s, 10, %d)\n", valName, fieldType.Bits()))
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
-		builder.WriteString(indent + "if intVal != 0 {\n") // 检查是否为零值
-		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(intVal)\n", fieldName, typeName))
-		builder.WriteString(indent + "}\n")
+		builder.WriteString(indent + fmt.Sprintf("%s = %s(intVal)\n", fieldName, typeName))
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		builder.WriteString(indent + fmt.Sprintf("uintVal, err := strconv.ParseUint(%s, 10, %d)\n", valName, fieldType.Bits()))
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
-		builder.WriteString(indent + "if uintVal != 0 {\n") // 检查是否为零值
-		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(uintVal)\n", fieldName, typeName))
-		builder.WriteString(indent + "}\n")
+		builder.WriteString(indent + fmt.Sprintf("%s = %s(uintVal)\n", fieldName, typeName))
 	case reflect.Float32, reflect.Float64:
 		builder.WriteString(indent + fmt.Sprintf("floatVal, err := strconv.ParseFloat(%s, %d)\n", valName, fieldType.Bits()))
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
-		builder.WriteString(indent + "if floatVal != 0 {\n") // 检查是否为零值
-		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(floatVal)\n", fieldName, typeName))
-		builder.WriteString(indent + "}\n")
+		builder.WriteString(indent + fmt.Sprintf("%s = %s(floatVal)\n", fieldName, typeName))
 	case reflect.Bool:
 		builder.WriteString(indent + fmt.Sprintf("boolVal, err := strconv.ParseBool(%s)\n", valName))
 		builder.WriteString(indent + "if err != nil {\n")
 		builder.WriteString(indent + fmt.Sprintf("\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
 		builder.WriteString(indent + "}\n")
-		builder.WriteString(indent + "if boolVal {\n") // 检查是否为零值
-		builder.WriteString(indent + fmt.Sprintf("\t%s = %s(boolVal)\n", fieldName, typeName))
-		builder.WriteString(indent + "}\n")
+		builder.WriteString(indent + fmt.Sprintf("%s = %s(boolVal)\n", fieldName, typeName))
 	default:
 		return fmt.Errorf("unsupported parameter type %q for field %s", fieldType.String(), fieldName)
 	}
@@ -1001,6 +999,7 @@ func generateFileContent(pkgPath string, apis []RouterHandler) (string, error) {
 		"errors":                    false,
 		"fmt":                       false,
 		"io":                        false,
+		"net/http":                  false,
 		"reflect":                   false,
 		"strconv":                   false,
 		"strings":                   false,
@@ -1015,6 +1014,7 @@ func generateFileContent(pkgPath string, apis []RouterHandler) (string, error) {
 		"errors",
 		"fmt",
 		"io",
+		"net/http",
 		"reflect",
 		"strconv",
 		"strings",
@@ -1155,6 +1155,9 @@ func markUsedImports(method string, usedImports map[string]bool) {
 	}
 	if strings.Contains(method, "io.") {
 		usedImports["io"] = true
+	}
+	if strings.Contains(method, "http.") {
+		usedImports["net/http"] = true
 	}
 	if strings.Contains(method, "json.") {
 		usedImports["encoding/json"] = true

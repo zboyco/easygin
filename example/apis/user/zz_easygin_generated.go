@@ -3,13 +3,14 @@
 package user
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,7 +24,11 @@ import (
 func (r *CreateUser) EasyGinBindParameters(c *gin.Context) error {
 	{
 		// 绑定JSON请求体
-		decoder := json.NewDecoder(c.Request.Body)
+		bodyBytes, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			return err
+		}
+		decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
 		if err := decoder.Decode(&r.Body); err != nil {
 			return err
 		}
@@ -36,7 +41,7 @@ func (r *CreateUser) EasyGinBindParameters(c *gin.Context) error {
 
 		if easygin.HandleBodyJsonOmitEmptyAndDefault() {
 			// 校验JSON必填字段和默认值
-			if err := easygin.ValidateJsonRequiredFields(reflect.ValueOf(&r.Body)); err != nil {
+			if err := easygin.ValidateJsonRequiredFieldsWithRaw(reflect.ValueOf(&r.Body), bodyBytes); err != nil {
 				return err
 			}
 		}
@@ -47,20 +52,25 @@ func (r *CreateUser) EasyGinBindParameters(c *gin.Context) error {
 func (r *GetUser) EasyGinBindParameters(c *gin.Context) error {
 	// 绑定头部参数 Token
 	{
-		headerVal := c.GetHeader("Token")
-		if headerVal == "" {
+		headerKey := http.CanonicalHeaderKey("Token")
+		headerVals, headerOK := c.Request.Header[headerKey]
+		if !headerOK && headerKey != "Token" {
+			headerVals, headerOK = c.Request.Header["Token"]
+		}
+		headerVal := ""
+		if len(headerVals) > 0 {
+			headerVal = headerVals[0]
+		}
+		if !headerOK {
 			return errors.New("missing required parameter 'Token' in header")
 		}
-		if headerVal != "" {
+		if headerOK {
 			r.Token = string(headerVal)
 		}
 	}
 	// 绑定路径参数 id
 	{
 		pathVal := c.Param("id")
-		if pathVal == "0" {
-			pathVal = ""
-		}
 		if pathVal == "" {
 			return errors.New("missing required parameter 'id' in path")
 		}
@@ -121,24 +131,23 @@ func (r *GetUser) EasyGinBindParameters(c *gin.Context) error {
 func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	// 绑定查询参数 stdStr
 	{
-		queryVal := c.Query("stdStr")
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdStr")
+		if !queryOK {
 			queryVal = "std-str"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			r.StdStr = string(queryVal)
 		}
 	}
 	// 绑定查询参数 stdBool
 	{
-		queryVal := c.Query("stdBool")
-		if queryVal == "false" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdBool")
+		if !queryOK {
 			queryVal = "true"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			boolVal, err := strconv.ParseBool(queryVal)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'stdBool': %v", err.Error())
@@ -148,14 +157,12 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 stdInt
 	{
-		queryVal := c.Query("stdInt")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdInt")
+		if !queryOK {
 			queryVal = "1"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			intVal, err := strconv.ParseInt(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'stdInt': %v", err.Error())
@@ -165,14 +172,12 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 stdInt64
 	{
-		queryVal := c.Query("stdInt64")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdInt64")
+		if !queryOK {
 			queryVal = "64"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			intVal, err := strconv.ParseInt(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'stdInt64': %v", err.Error())
@@ -182,14 +187,12 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 stdUint
 	{
-		queryVal := c.Query("stdUint")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdUint")
+		if !queryOK {
 			queryVal = "2"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			uintVal, err := strconv.ParseUint(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'stdUint': %v", err.Error())
@@ -199,14 +202,12 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 stdUint64
 	{
-		queryVal := c.Query("stdUint64")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdUint64")
+		if !queryOK {
 			queryVal = "10"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			uintVal, err := strconv.ParseUint(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'stdUint64': %v", err.Error())
@@ -216,16 +217,13 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 stdFloat32
 	{
-		queryVal := c.Query("stdFloat32")
-		tempVal, err := strconv.ParseFloat(queryVal, 64)
-		if err == nil && tempVal == 0.0 {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdFloat32")
+		if !queryOK {
 			queryVal = "1.25"
+			queryOK = true
 		}
-		if queryVal != "" {
-			floatVal, err := strconv.ParseFloat(queryVal, 64)
+		if queryOK {
+			floatVal, err := strconv.ParseFloat(queryVal, 32)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'stdFloat32': %v", err.Error())
 			}
@@ -234,15 +232,12 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 stdFloat64
 	{
-		queryVal := c.Query("stdFloat64")
-		tempVal, err := strconv.ParseFloat(queryVal, 64)
-		if err == nil && tempVal == 0.0 {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdFloat64")
+		if !queryOK {
 			queryVal = "3.14"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			floatVal, err := strconv.ParseFloat(queryVal, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'stdFloat64': %v", err.Error())
@@ -252,14 +247,12 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 stdTime
 	{
-		queryVal := c.Query("stdTime")
-		if strings.HasPrefix(queryVal, "0000-00-00T00:00:00") {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdTime")
+		if !queryOK {
 			queryVal = "2024-01-01T00:00:00Z"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			parsedVal := new(time.Time)
 			if err := parsedVal.UnmarshalText([]byte(queryVal)); err != nil {
 				return fmt.Errorf("invalid parameter 'stdTime': %v", err.Error())
@@ -269,24 +262,23 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 aliasStr
 	{
-		queryVal := c.Query("aliasStr")
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("aliasStr")
+		if !queryOK {
 			queryVal = "alias-str"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			r.AliasStr = string(queryVal)
 		}
 	}
 	// 绑定查询参数 aliasBool
 	{
-		queryVal := c.Query("aliasBool")
-		if queryVal == "false" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("aliasBool")
+		if !queryOK {
 			queryVal = "false"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			boolVal, err := strconv.ParseBool(queryVal)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'aliasBool': %v", err.Error())
@@ -296,14 +288,12 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 aliasInt
 	{
-		queryVal := c.Query("aliasInt")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("aliasInt")
+		if !queryOK {
 			queryVal = "12"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			intVal, err := strconv.ParseInt(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'aliasInt': %v", err.Error())
@@ -313,14 +303,12 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 aliasUint
 	{
-		queryVal := c.Query("aliasUint")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("aliasUint")
+		if !queryOK {
 			queryVal = "22"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			uintVal, err := strconv.ParseUint(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'aliasUint': %v", err.Error())
@@ -330,15 +318,12 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 aliasFloat
 	{
-		queryVal := c.Query("aliasFloat")
-		tempVal, err := strconv.ParseFloat(queryVal, 64)
-		if err == nil && tempVal == 0.0 {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("aliasFloat")
+		if !queryOK {
 			queryVal = "6.28"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			floatVal, err := strconv.ParseFloat(queryVal, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'aliasFloat': %v", err.Error())
@@ -348,14 +333,12 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 aliasTime
 	{
-		queryVal := c.Query("aliasTime")
-		if strings.HasPrefix(queryVal, "0000-00-00T00:00:00") {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("aliasTime")
+		if !queryOK {
 			queryVal = "2024-02-01T00:00:00Z"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			parsedVal := new(time.Time)
 			if err := parsedVal.UnmarshalText([]byte(queryVal)); err != nil {
 				return fmt.Errorf("invalid parameter 'aliasTime': %v", err.Error())
@@ -365,24 +348,23 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 customStr
 	{
-		queryVal := c.Query("customStr")
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("customStr")
+		if !queryOK {
 			queryVal = "custom-str"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			r.CustomStr = types.CustomString(queryVal)
 		}
 	}
 	// 绑定查询参数 customBool
 	{
-		queryVal := c.Query("customBool")
-		if queryVal == "false" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("customBool")
+		if !queryOK {
 			queryVal = "true"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			boolVal, err := strconv.ParseBool(queryVal)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'customBool': %v", err.Error())
@@ -392,14 +374,12 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 customInt
 	{
-		queryVal := c.Query("customInt")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("customInt")
+		if !queryOK {
 			queryVal = "30"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			intVal, err := strconv.ParseInt(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'customInt': %v", err.Error())
@@ -409,14 +389,12 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 customUint
 	{
-		queryVal := c.Query("customUint")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("customUint")
+		if !queryOK {
 			queryVal = "40"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			uintVal, err := strconv.ParseUint(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'customUint': %v", err.Error())
@@ -426,15 +404,12 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 customFloat
 	{
-		queryVal := c.Query("customFloat")
-		tempVal, err := strconv.ParseFloat(queryVal, 64)
-		if err == nil && tempVal == 0.0 {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("customFloat")
+		if !queryOK {
 			queryVal = "9.9"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			floatVal, err := strconv.ParseFloat(queryVal, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'customFloat': %v", err.Error())
@@ -444,11 +419,12 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 customTime
 	{
-		queryVal := c.Query("customTime")
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("customTime")
+		if !queryOK {
 			queryVal = "2024-03-01T00:00:00Z"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			parsedVal := new(types.CustomTime)
 			if err := parsedVal.UnmarshalText([]byte(queryVal)); err != nil {
 				return fmt.Errorf("invalid parameter 'customTime': %v", err.Error())
@@ -458,134 +434,110 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 stdStrPtr
 	{
-		queryVal := c.Query("stdStrPtr")
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdStrPtr")
+		if !queryOK {
 			queryVal = "std-str"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(string)
-			if queryVal != "" {
-				*tmpVal = string(queryVal)
-			}
+			*tmpVal = string(queryVal)
 			r.PtrStdStr = tmpVal
 		}
 	}
 	// 绑定查询参数 stdBoolPtr
 	{
-		queryVal := c.Query("stdBoolPtr")
-		if queryVal == "false" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdBoolPtr")
+		if !queryOK {
 			queryVal = "true"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(bool)
 			boolVal, err := strconv.ParseBool(queryVal)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'stdBoolPtr': %v", err.Error())
 			}
-			if boolVal {
-				*tmpVal = bool(boolVal)
-			}
+			*tmpVal = bool(boolVal)
 			r.PtrStdBool = tmpVal
 		}
 	}
 	// 绑定查询参数 stdIntPtr
 	{
-		queryVal := c.Query("stdIntPtr")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdIntPtr")
+		if !queryOK {
 			queryVal = "2"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(int)
 			intVal, err := strconv.ParseInt(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'stdIntPtr': %v", err.Error())
 			}
-			if intVal != 0 {
-				*tmpVal = int(intVal)
-			}
+			*tmpVal = int(intVal)
 			r.PtrStdInt = tmpVal
 		}
 	}
 	// 绑定查询参数 stdInt64Ptr
 	{
-		queryVal := c.Query("stdInt64Ptr")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdInt64Ptr")
+		if !queryOK {
 			queryVal = "128"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(int64)
 			intVal, err := strconv.ParseInt(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'stdInt64Ptr': %v", err.Error())
 			}
-			if intVal != 0 {
-				*tmpVal = int64(intVal)
-			}
+			*tmpVal = int64(intVal)
 			r.PtrStdInt64 = tmpVal
 		}
 	}
 	// 绑定查询参数 stdUint64Ptr
 	{
-		queryVal := c.Query("stdUint64Ptr")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdUint64Ptr")
+		if !queryOK {
 			queryVal = "80"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(uint64)
 			uintVal, err := strconv.ParseUint(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'stdUint64Ptr': %v", err.Error())
 			}
-			if uintVal != 0 {
-				*tmpVal = uint64(uintVal)
-			}
+			*tmpVal = uint64(uintVal)
 			r.PtrStdUint64 = tmpVal
 		}
 	}
 	// 绑定查询参数 stdFloat64Ptr
 	{
-		queryVal := c.Query("stdFloat64Ptr")
-		tempVal, err := strconv.ParseFloat(queryVal, 64)
-		if err == nil && tempVal == 0.0 {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdFloat64Ptr")
+		if !queryOK {
 			queryVal = "2.71"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(float64)
 			floatVal, err := strconv.ParseFloat(queryVal, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'stdFloat64Ptr': %v", err.Error())
 			}
-			if floatVal != 0 {
-				*tmpVal = float64(floatVal)
-			}
+			*tmpVal = float64(floatVal)
 			r.PtrStdFloat64 = tmpVal
 		}
 	}
 	// 绑定查询参数 stdTimePtr
 	{
-		queryVal := c.Query("stdTimePtr")
-		if strings.HasPrefix(queryVal, "0000-00-00T00:00:00") {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("stdTimePtr")
+		if !queryOK {
 			queryVal = "2024-04-01T00:00:00Z"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(time.Time)
 			if err := tmpVal.UnmarshalText([]byte(queryVal)); err != nil {
 				return fmt.Errorf("invalid parameter 'stdTimePtr': %v", err.Error())
@@ -595,113 +547,93 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 aliasStrPtr
 	{
-		queryVal := c.Query("aliasStrPtr")
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("aliasStrPtr")
+		if !queryOK {
 			queryVal = "alias-str"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(string)
-			if queryVal != "" {
-				*tmpVal = string(queryVal)
-			}
+			*tmpVal = string(queryVal)
 			r.PtrAliasStr = tmpVal
 		}
 	}
 	// 绑定查询参数 aliasBoolPtr
 	{
-		queryVal := c.Query("aliasBoolPtr")
-		if queryVal == "false" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("aliasBoolPtr")
+		if !queryOK {
 			queryVal = "true"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(bool)
 			boolVal, err := strconv.ParseBool(queryVal)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'aliasBoolPtr': %v", err.Error())
 			}
-			if boolVal {
-				*tmpVal = bool(boolVal)
-			}
+			*tmpVal = bool(boolVal)
 			r.PtrAliasBool = tmpVal
 		}
 	}
 	// 绑定查询参数 aliasIntPtr
 	{
-		queryVal := c.Query("aliasIntPtr")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("aliasIntPtr")
+		if !queryOK {
 			queryVal = "52"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(int)
 			intVal, err := strconv.ParseInt(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'aliasIntPtr': %v", err.Error())
 			}
-			if intVal != 0 {
-				*tmpVal = int(intVal)
-			}
+			*tmpVal = int(intVal)
 			r.PtrAliasInt = tmpVal
 		}
 	}
 	// 绑定查询参数 aliasUintPtr
 	{
-		queryVal := c.Query("aliasUintPtr")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("aliasUintPtr")
+		if !queryOK {
 			queryVal = "60"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(uint64)
 			uintVal, err := strconv.ParseUint(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'aliasUintPtr': %v", err.Error())
 			}
-			if uintVal != 0 {
-				*tmpVal = uint64(uintVal)
-			}
+			*tmpVal = uint64(uintVal)
 			r.PtrAliasUint = tmpVal
 		}
 	}
 	// 绑定查询参数 aliasFloatPtr
 	{
-		queryVal := c.Query("aliasFloatPtr")
-		tempVal, err := strconv.ParseFloat(queryVal, 64)
-		if err == nil && tempVal == 0.0 {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("aliasFloatPtr")
+		if !queryOK {
 			queryVal = "3.14"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(float64)
 			floatVal, err := strconv.ParseFloat(queryVal, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'aliasFloatPtr': %v", err.Error())
 			}
-			if floatVal != 0 {
-				*tmpVal = float64(floatVal)
-			}
+			*tmpVal = float64(floatVal)
 			r.PtrAliasFloat = tmpVal
 		}
 	}
 	// 绑定查询参数 aliasTimePtr
 	{
-		queryVal := c.Query("aliasTimePtr")
-		if strings.HasPrefix(queryVal, "0000-00-00T00:00:00") {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("aliasTimePtr")
+		if !queryOK {
 			queryVal = "2024-05-01T00:00:00Z"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(time.Time)
 			if err := tmpVal.UnmarshalText([]byte(queryVal)); err != nil {
 				return fmt.Errorf("invalid parameter 'aliasTimePtr': %v", err.Error())
@@ -711,53 +643,46 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 customIntPtr
 	{
-		queryVal := c.Query("customIntPtr")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("customIntPtr")
+		if !queryOK {
 			queryVal = "70"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(types.CustomInt)
 			intVal, err := strconv.ParseInt(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'customIntPtr': %v", err.Error())
 			}
-			if intVal != 0 {
-				*tmpVal = types.CustomInt(intVal)
-			}
+			*tmpVal = types.CustomInt(intVal)
 			r.PtrCustomInt = tmpVal
 		}
 	}
 	// 绑定查询参数 customBoolPtr
 	{
-		queryVal := c.Query("customBoolPtr")
-		if queryVal == "false" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("customBoolPtr")
+		if !queryOK {
 			queryVal = "false"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(types.CustomBool)
 			boolVal, err := strconv.ParseBool(queryVal)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'customBoolPtr': %v", err.Error())
 			}
-			if boolVal {
-				*tmpVal = types.CustomBool(boolVal)
-			}
+			*tmpVal = types.CustomBool(boolVal)
 			r.PtrCustomBool = tmpVal
 		}
 	}
 	// 绑定查询参数 customTimePtr
 	{
-		queryVal := c.Query("customTimePtr")
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("customTimePtr")
+		if !queryOK {
 			queryVal = "2024-06-01T00:00:00Z"
+			queryOK = true
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(types.CustomTime)
 			if err := tmpVal.UnmarshalText([]byte(queryVal)); err != nil {
 				return fmt.Errorf("invalid parameter 'customTimePtr': %v", err.Error())
@@ -797,14 +722,11 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 sameType
 	{
-		queryVal := c.Query("sameType")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("sameType")
+		if !queryOK {
 			return errors.New("missing required parameter 'sameType' in query")
 		}
-		if queryVal != "" {
+		if queryOK {
 			intVal, err := strconv.ParseInt(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'sameType': %v", err.Error())
@@ -814,14 +736,11 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 sameType
 	{
-		queryVal := c.Query("sameType")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("sameType")
+		if !queryOK {
 			return errors.New("missing required parameter 'sameType' in query")
 		}
-		if queryVal != "" {
+		if queryOK {
 			intVal, err := strconv.ParseInt(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'sameType': %v", err.Error())
@@ -831,43 +750,33 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定查询参数 sameTypePtr
 	{
-		queryVal := c.Query("sameTypePtr")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("sameTypePtr")
+		if !queryOK {
 			return errors.New("missing required parameter 'sameTypePtr' in query")
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(datatypes.SameType)
 			intVal, err := strconv.ParseInt(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'sameTypePtr': %v", err.Error())
 			}
-			if intVal != 0 {
-				*tmpVal = datatypes.SameType(intVal)
-			}
+			*tmpVal = datatypes.SameType(intVal)
 			r.PtrSameType1 = tmpVal
 		}
 	}
 	// 绑定查询参数 sameTypePtr
 	{
-		queryVal := c.Query("sameTypePtr")
-		if queryVal == "0" {
-			queryVal = ""
-		}
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("sameTypePtr")
+		if !queryOK {
 			return errors.New("missing required parameter 'sameTypePtr' in query")
 		}
-		if queryVal != "" {
+		if queryOK {
 			tmpVal := new(datatypes2.SameType)
 			intVal, err := strconv.ParseInt(queryVal, 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'sameTypePtr': %v", err.Error())
 			}
-			if intVal != 0 {
-				*tmpVal = datatypes2.SameType(intVal)
-			}
+			*tmpVal = datatypes2.SameType(intVal)
 			r.PtrSameType2 = tmpVal
 		}
 	}

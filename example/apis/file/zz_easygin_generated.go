@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/gin-gonic/gin"
+	"github.com/zboyco/easygin"
 )
 
 func (r *Download) EasyGinBindParameters(c *gin.Context) error {
@@ -19,11 +20,11 @@ func (r *Image) EasyGinBindParameters(c *gin.Context) error {
 func (r *Redirect) EasyGinBindParameters(c *gin.Context) error {
 	// 绑定查询参数 url
 	{
-		queryVal := c.Query("url")
-		if queryVal == "" {
+		queryVal, queryOK := c.GetQuery("url")
+		if !queryOK {
 			return errors.New("missing required parameter 'url' in query")
 		}
-		if queryVal != "" {
+		if queryOK {
 			r.Url = string(queryVal)
 		}
 	}
@@ -37,7 +38,7 @@ func (r *UploadFile) EasyGinBindParameters(c *gin.Context) error {
 	}
 
 	// 绑定multipart表单数据
-	if err := c.Request.ParseMultipartForm(1 << 30); err != nil {
+	if err := c.Request.ParseMultipartForm(easygin.GetMultipartMemoryLimit()); err != nil {
 		return err
 	}
 
@@ -53,16 +54,19 @@ func (r *UploadFile) EasyGinBindParameters(c *gin.Context) error {
 	}
 	// 绑定表单参数 images
 	{
-		if files, ok := c.Request.MultipartForm.File["images"]; ok {
+		if files, ok := c.Request.MultipartForm.File["images"]; ok && len(files) > 0 {
 			r.Body.Images = files
 		} else {
 		}
 	}
 	// 绑定表单参数 tags
 	{
-		r.Body.Tags = c.PostFormArray("tags")
-		if len(r.Body.Tags) == 0 {
+		values, valuesOK := c.Request.MultipartForm.Value["tags"]
+		if !valuesOK {
 			return errors.New("missing required parameter 'tags' in form")
+		}
+		if valuesOK {
+			r.Body.Tags = values
 		}
 	}
 	return nil

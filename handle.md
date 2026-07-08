@@ -93,7 +93,7 @@
   4. 使用 `getOrInitFieldByIndex` 获取嵌套字段，并自动初始化嵌入指针结构体
   5. 处理不同类型的参数 (body, query, path, header)
   6. 处理multipart表单和JSON请求体
-  7. 处理默认值和必填参数验证
+  7. 按参数是否出现处理默认值和必填参数验证；显式空字符串不等同于缺失
 
 ### 7. getOrInitFieldByIndex
 - 签名: `func getOrInitFieldByIndex(v reflect.Value, index []int) (reflect.Value, error)`
@@ -164,14 +164,15 @@
 3. 获取缓存的字段信息
 4. 自动初始化嵌入指针字段链路，避免 `*Embedded` 字段为 nil 时访问子字段 panic
 5. 遍历字段，根据标签类型进行不同处理
-6. 处理必填参数和默认值
+6. 按参数是否出现处理必填参数和默认值
 7. 进行类型转换和赋值
 
 ### 3. 特殊处理
 - multipart表单: 解析表单数据，处理文件上传
 - JSON请求体: 解析JSON数据，支持嵌套结构；连续多个 JSON 值会被 `decodeJSON` 拒绝
 - 时间类型: 特殊处理时间格式
-- 指针类型: 处理nil指针和指针指向的值
+- 指针类型: 缺失的可选参数保持 nil；显式空字符串绑定到 `*string` 时会得到非 nil 的空字符串指针
+- presence 语义: query 使用 `GetQuery` 区分缺失和空值，header 使用请求头 key 是否存在区分缺失和空值；default 只在参数缺失时生效
 
 ## 响应生成流程
 
@@ -213,12 +214,12 @@
 ### name标签
 - 格式: `name:"paramName,omitempty"`
 - 处理: 指定参数名称和是否可选
-- 用途: 确定参数的名称和必填性
+- 用途: 确定参数的名称和是否允许缺失；未标记 `omitempty` 时参数必须出现
 
 ### default标签
 - 格式: `default:"value"`
 - 处理: 指定参数的默认值
-- 用途: 当参数未提供时使用默认值
+- 用途: 当参数未提供时使用默认值；显式传入空字符串不会触发默认值
 
 ### mime标签
 - 格式: `mime:"multipart"`

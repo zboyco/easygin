@@ -310,24 +310,23 @@ func isJSONNull(raw json.RawMessage) bool {
 	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
 }
 
-// handleFormFieldValue 统一处理表单字段值的验证和设置
-func handleFormFieldValue(field reflect.StructField, fieldVal reflect.Value, value, name, structPath string) error {
-	// 如果值不为空，先尝试设置字段值
-	if value != "" {
-		return setFieldValue(fieldVal, value, name, field.Type)
+// handleFormFieldValue 统一处理表单字段值的 presence 校验和设置。
+func handleFormFieldValue(field reflect.StructField, fieldVal reflect.Value, value, name, structPath string, present bool) error {
+	canBeEmpty, defaultValue := handleEmptyValue(structPath, field, "name")
+	if !present {
+		if !canBeEmpty {
+			return fmt.Errorf("missing required parameter '%s' in form", name)
+		}
+		// 参数缺失时才应用默认值；显式空值会继续按目标类型绑定。
+		if defaultValue != "" {
+			if err := setFieldValue(fieldVal, defaultValue, name, field.Type); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
-	canBeEmpty, defaultValue := handleEmptyValue(structPath, field, "name")
-	if !canBeEmpty {
-		return fmt.Errorf("missing required parameter '%s' in form", name)
-	}
-	// 如果有默认值，设置默认值
-	if defaultValue != "" {
-		if err := setFieldValue(fieldVal, defaultValue, name, field.Type); err != nil {
-			return err
-		}
-	}
-	return nil
+	return setFieldValue(fieldVal, value, name, field.Type)
 }
 
 // handleSliceValue 处理数组类型字段的值
@@ -457,8 +456,15 @@ func decodeMultipartForm(form *multipart.Form, v any) error {
 		}
 
 		// 处理普通字段
-		vals := form.Value[info.name]
+		vals, present := form.Value[info.name]
 		if info.isSlice {
+			if !present {
+				canBeEmpty, _ := handleEmptyValue(info.structPath, structType.Field(info.fieldIndex), "name")
+				if !canBeEmpty {
+					return fmt.Errorf("missing required parameter '%s' in form", info.name)
+				}
+				continue
+			}
 			if err := handleSliceValue(fieldVal, vals, info.name); err != nil {
 				return err
 			}
@@ -467,7 +473,7 @@ func decodeMultipartForm(form *multipart.Form, v any) error {
 			if len(vals) > 0 {
 				val = vals[0]
 			}
-			if err := handleFormFieldValue(structType.Field(info.fieldIndex), fieldVal, val, info.name, info.structPath); err != nil {
+			if err := handleFormFieldValue(structType.Field(info.fieldIndex), fieldVal, val, info.name, info.structPath, present); err != nil {
 				return err
 			}
 		}

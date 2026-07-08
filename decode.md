@@ -15,11 +15,11 @@
 ### 信息存储结构
 - `bodyFieldInfo`: 存储字段的标签信息
   - `tagValue`: 标签值
-  - `hasOmitempty`: 是否可为空
+  - `hasOmitempty`: 是否允许缺失
   - `defaultValue`: 默认值
 - `validateFieldInfo`: 存储字段的验证信息
   - `index`: 字段索引
-  - `canBeEmpty`: 是否可为空
+  - `canBeEmpty`: 是否允许缺失
   - `defaultValue`: 默认值
   - `jsonName`: JSON字段名
   - `isStruct`: 是否为结构体类型
@@ -40,28 +40,30 @@
   1. 使用`json.NewDecoder`解析JSON数据
   2. 解析后继续读取一个空结构体，只有遇到 `io.EOF` 才表示请求体结束
   3. 如果存在第二个 JSON 值，返回 `parse json failed: multiple JSON values are not allowed`
-  4. 如果启用了JSON字段验证，调用`ValidateJsonRequiredFields`验证必填字段
+  4. 如果启用了JSON字段验证，调用`ValidateJsonRequiredFieldsWithRaw`按原始 JSON 字段出现情况验证必填字段和默认值
 
-### 2. ValidateJsonRequiredFields
+### 2. ValidateJsonRequiredFields / ValidateJsonRequiredFieldsWithRaw
 - 签名: `func ValidateJsonRequiredFields(v reflect.Value) error`
+- 签名: `func ValidateJsonRequiredFieldsWithRaw(v reflect.Value, raw []byte) error`
 - 功能: 递归验证结构体的必填字段
 - 处理内容:
   1. 处理指针类型
   2. 获取缓存的字段验证信息
-  3. 验证每个字段是否满足必填要求
-  4. 为空字段设置默认值
-  5. 递归处理嵌套结构体
+  3. `ValidateJsonRequiredFieldsWithRaw` 根据原始 JSON 对象判断字段是否出现；显式 `0`、`false`、`""` 不会被当作缺失，`null` 按缺失处理
+  4. `ValidateJsonRequiredFields` 保留旧反射语义，无法区分字段缺失和显式零值，仅用于兼容直接调用者
+  5. 字段缺失且配置 `default` 时设置默认值
+  6. 递归处理嵌套结构体
 
 ### 3. handleEmptyValue
 - 签名: `func handleEmptyValue(structPath string, field reflect.StructField, tagKey string) (bool, string)`
-- 功能: 处理字段值为空的情况，检查omitempty和default标签
+- 功能: 处理字段是否允许缺失，检查omitempty和default标签
 - 返回:
-  - 第一个返回值: 字段是否可以为空
+  - 第一个返回值: 字段是否允许缺失
   - 第二个返回值: 字段的默认值
 
 ### 4. isEmptyValue
 - 签名: `func isEmptyValue(v reflect.Value) bool`
-- 功能: 判断字段值是否为空
+- 功能: 判断字段值是否为空；主要服务于旧的 `ValidateJsonRequiredFields` 反射语义
 - 支持类型:
   1. 基本类型 (字符串、整数、浮点数、布尔值)
   2. 复合类型 (数组、切片、映射)
@@ -83,16 +85,16 @@
   1. 获取缓存的表单字段信息
   2. 处理文件字段：`*multipart.FileHeader` 取第一个文件，`[]*multipart.FileHeader` 取同名文件数组
   3. 处理普通字段和切片字段：普通字段取第一个值，切片字段遍历所有同名值并逐项转换
-  4. 验证必填字段和设置默认值
+  4. 普通字段和切片字段按 `form.Value` 中是否存在字段名判断缺失；显式空字符串按已提供处理
+  5. 默认值只在字段缺失时设置
 
 ### 7. handleFormFieldValue
-- 签名: `func handleFormFieldValue(field reflect.StructField, fieldVal reflect.Value, value, name, structPath string) error`
-- 功能: 统一处理表单字段值的验证和设置
+- 签名: `func handleFormFieldValue(field reflect.StructField, fieldVal reflect.Value, value, name, structPath string, present bool) error`
+- 功能: 统一处理表单字段值的 presence 校验和设置
 - 流程:
-  1. 设置字段值
-  2. 检查字段是否为空
-  3. 验证必填性
-  4. 设置默认值
+  1. 如果字段缺失，检查 `omitempty`
+  2. 字段缺失且有默认值时设置默认值
+  3. 字段已提供时调用 `setFieldValue` 进行类型转换和赋值，显式空字符串不触发默认值
 
 ### 8. handleSliceValue
 - 签名: `func handleSliceValue(fieldVal reflect.Value, vals []string, name string) error`
@@ -138,16 +140,16 @@
 ### JSON标签
 - 格式: `json:"name,omitempty"`
 - 处理: 解析字段名和omitempty选项
-- 用途: 确定字段的JSON名称和是否可为空
+- 用途: 确定字段的JSON名称和是否允许缺失
 
 ### 名称标签
 - 格式: `name:"fieldname,omitempty"`
 - 处理: 解析字段名和omitempty选项
-- 用途: 确定表单字段名称和是否可为空
+- 用途: 确定表单字段名称和是否允许缺失
 
 ### 默认值标签
 - 格式: `default:"value"`
-- 处理: 当字段为空时使用默认值
+- 处理: 当字段缺失时使用默认值；显式空字符串按已提供字段处理
 - 用途: 为可选字段提供默认值
 
 ## 性能优化
@@ -175,8 +177,8 @@
 - JSON 请求体错误：解析失败、非 EOF 尾随内容、连续多个 JSON 值都会以 `parse json failed: ...` 包装返回
 
 ## 特殊类型处理
-- `time.Time`: 特殊处理空值检查
+- `time.Time`: 按 RFC3339 解析，空字符串作为已提供值时会返回类型转换错误
 - `multipart.FileHeader`: 处理文件上传
-- 指针类型: 处理nil指针和指针指向的值
+- 指针类型: 缺失的可选字段保持 nil；显式空字符串绑定到 `*string` 时得到非 nil 空字符串指针
 - 结构体类型: 递归处理嵌套结构体
 - 切片类型: 处理多值表单字段；运行时反射绑定的 query 参数仍按单值读取，query 切片能力由静态参数绑定生成代码提供

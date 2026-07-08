@@ -3,6 +3,7 @@
 package middleware
 
 import (
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
@@ -10,15 +11,23 @@ import (
 func (r *MustAuth) EasyGinBindParameters(c *gin.Context) error {
 	// 绑定头部参数 Authorization
 	{
-		headerVal := c.GetHeader("Authorization")
-		if headerVal != "" {
+		headerKey := http.CanonicalHeaderKey("Authorization")
+		headerVals, headerOK := c.Request.Header[headerKey]
+		if !headerOK && headerKey != "Authorization" {
+			headerVals, headerOK = c.Request.Header["Authorization"]
+		}
+		headerVal := ""
+		if len(headerVals) > 0 {
+			headerVal = headerVals[0]
+		}
+		if headerOK {
 			r.Authorization = string(headerVal)
 		}
 	}
 	// 绑定查询参数 authorization
 	{
-		queryVal := c.Query("authorization")
-		if queryVal != "" {
+		queryVal, queryOK := c.GetQuery("authorization")
+		if queryOK {
 			r.AuthorizationInQuery = string(queryVal)
 		}
 	}

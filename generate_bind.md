@@ -45,30 +45,29 @@
 
 ### 4. 参数绑定生成函数
 - `generatePathBinding`: 生成路径参数绑定代码，签名包含 `currentPkgPath` 与 `pkgAliases`，用于跨包类型名补全
-- `generateQueryBinding`: 生成查询参数绑定代码；签名包含 `currentPkgPath` 与 `pkgAliases`，支持识别 `[]T`、`*[]T` 以及 `[]*T` 字段，先判断是否允许为空 (`omitempty`)，再调用切片专用逻辑或回退到单值解析，并对默认值、必填校验等保持一致处理，同时配合 `addZeroValueCheck` 将 `"0"`、`"false"`、零时间等视为未填以便必填校验和默认值覆盖
+- `generateQueryBinding`: 生成查询参数绑定代码；签名包含 `currentPkgPath` 与 `pkgAliases`，支持识别 `[]T`、`*[]T` 以及 `[]*T` 字段，先按参数是否出现处理 `omitempty`、必填校验和默认值，再调用切片专用逻辑或回退到单值解析；显式传入的 `"0"`、`"false"`、空字符串等值不会被当作缺失
 - `generateQuerySliceBinding`: 查询参数切片绑定逻辑，使用 `c.QueryArray()` 捕获同名参数数组，针对 string、bool、各类有符号/无符号整数和浮点类型（及其指针）依次转换并回写字段；元素类型实现 `encoding.TextUnmarshaler` 时会逐项调用 `UnmarshalText`，支持 `[]T`、`[]*T`、`*[]T`、`*[]*T`；不支持的类型在生成阶段返回错误
-- `generateHeaderBinding`: 生成头部参数绑定代码，签名包含 `currentPkgPath` 与 `pkgAliases`
+- `generateHeaderBinding`: 生成头部参数绑定代码，签名包含 `currentPkgPath` 与 `pkgAliases`；使用 `http.CanonicalHeaderKey` 和请求头 key presence 区分缺失与空 header
 - `generateBodyBinding`: 生成请求体绑定代码，签名包含 `currentPkgPath` 与 `pkgAliases`
   - 支持指针类型字段的实例化
   - 针对匿名结构体指针，使用格式化的多行定义提高可读性
   - 针对命名结构体指针，使用标准实例化方式
   - 为跨包命名结构体指针预先触发 `collectExternalPackages` 收集导入，避免生成代码缺失依赖
-  - `mime:"multipart"` 分支调用 `ParseMultipartForm(1 << 30)` 后遍历子字段，复用 `generateFormBinding` 生成表单/文件绑定
+  - `mime:"multipart"` 分支调用 `ParseMultipartForm(easygin.GetMultipartMemoryLimit())` 后遍历子字段，复用 `generateFormBinding` 生成表单/文件绑定
   - JSON 分支在首次 `Decode` 后继续尝试读取空结构体，只有 `io.EOF` 才表示请求体结束；如果存在第二个 JSON 值会返回 `multiple JSON values are not allowed`
-  - JSON 分支通过 `ValidateJsonRequiredFields`（受 `easygin.HandleBodyJsonOmitEmptyAndDefault()` 开关控制）做必填与默认值校验
+  - JSON 分支通过 `ValidateJsonRequiredFieldsWithRaw`（受 `easygin.HandleBodyJsonOmitEmptyAndDefault()` 开关控制）按字段出现情况做必填与默认值校验
 - `generateFormBinding`: 生成表单参数绑定代码，签名包含 `currentPkgPath` 与 `pkgAliases`
   - 支持单文件上传 (`*multipart.FileHeader`)
   - 支持多文件上传 (`[]*multipart.FileHeader`)
   - 支持字符串数组 (`[]string`)
   - 支持字符串数组指针 (`*[]string`)
   - 支持其他基本类型
-  - 按 `name` 标签的 `omitempty`/`default` 控制必填与默认值，自动应用零值检查与类型转换
+  - 按 `name` 标签的 `omitempty`/`default` 控制必填与默认值，默认值只在字段缺失时生效，字段出现后直接按目标类型转换
 
 ### 5. 类型转换函数
 - `generateValueConversion`: 生成值转换代码，签名包含 `currentPkgPath` 与 `pkgAliases`，不支持类型时返回生成阶段错误
 - `generateValueConversionForType`: 根据类型生成值转换代码，优先检测实现 `encoding.TextUnmarshaler` 的类型（含指针接收者），跨包类型自动补充包前缀，并避免生成二级指针赋值；无法静态生成转换代码时返回错误
 - `generateTypeConversion`: 生成类型转换代码，支持 `TextUnmarshaler` 优先解析并在跨包场景使用 `pkg.Type`，同时触发外部包收集；无法静态生成转换代码时返回错误
-- `addZeroValueCheck`: 添加零值检查代码
 - `getTypeNameWithPkg`/`getTextUnmarshalInfo`: 处理跨包类型名和 TextUnmarshal 接收者，结合别名表保证生成代码可编译
 - `getSliceTypeNameWithPkg`/`writeTextUnmarshalSliceAppend`: 生成 query 切片类型名，并为实现 `encoding.TextUnmarshaler` 的切片元素生成逐项解析和 append 代码
 
@@ -87,8 +86,8 @@
 
 ## 标签处理
 - `in`: 指定参数来源 (path, query, header, body)
-- `name`: 指定参数名称，支持omitempty选项
-- `default`: 指定默认值
+- `name`: 指定参数名称，支持omitempty选项；未标记 `omitempty` 时参数必须出现
+- `default`: 指定默认值；仅在参数缺失时生效，显式空字符串不会触发默认值
 - `mime`: 指定MIME类型，如multipart
 
 ## 生成代码特性
@@ -97,7 +96,7 @@
 3. 支持嵌入字段处理
 4. 支持必填参数验证
 5. 支持默认值设置
-6. 支持零值检查
+6. 支持按参数出现情况区分缺失与显式空值
 7. 支持 `encoding.TextUnmarshaler` 类型优先使用 `UnmarshalText` 解析，跨包类型自动补全包前缀并导入；query 切片元素实现该接口时也会逐项解析
 8. 支持multipart表单处理，包括文件上传
 9. 支持JSON请求体绑定和验证
@@ -105,7 +104,7 @@
 10. 支持匿名结构体的格式化生成，提高代码可读性
 11. 支持字符串数组和字符串数组指针类型的表单参数处理
 12. 支持查询参数切片的自动绑定，包含切片指针和指针元素；支持基础类型切片和实现 `encoding.TextUnmarshaler` 的自定义类型切片
-13. 零值输入（如 `"0"`, `"false"`, 零时间）会在必填校验前归一为空字符串，避免误判
+13. 零值输入（如 `"0"`, `"false"`）会按已提供参数处理，解析成功后直接写回字段；空字符串对非字符串类型会返回转换错误
 14. 同名不同路径的外部包会自动生成别名，基础包仅在实际使用时导入且不参与外部包别名
 15. 同一 API 类型仅生成一次绑定方法，确保导入与生成文件可重复、可复现
 16. 默认值类型不匹配、无法生成类型转换、query 切片类型不支持等问题都会作为生成阶段错误返回，而不是在生成代码里保留运行时 `panic` 或 `unsupported` 分支
@@ -146,8 +145,8 @@
 5. 格式化的匿名结构体定义，每个字段单独一行，提高可读性
 
 ## 特殊类型处理
-- 字符串数组 (`[]string`): 使用 `c.PostFormArray()` 方法获取表单中的数组值
-- 字符串数组指针 (`*[]string`): 使用 `c.PostFormArray()` 获取值后，将其地址赋给字段
+- 字符串数组 (`[]string`): 使用 `MultipartForm.Value` 判断字段是否出现并获取表单中的数组值
+- 字符串数组指针 (`*[]string`): 使用 `MultipartForm.Value` 判断字段是否出现，出现后将值切片地址赋给字段
 - 查询参数切片: 使用 `c.QueryArray()` 支持一次性解析 `[]string`、`[]bool`、各整数/浮点切片以及上述类型的指针版本（如 `[]*int`、`*[]float64`），并对 `omitempty`、必填校验与类型转换都进行统一处理
 - TextUnmarshaler 查询参数切片: 元素类型 `T` 或 `*T` 实现 `encoding.TextUnmarshaler` 时，支持 `[]T`、`[]*T`、`*[]T`、`*[]*T`，逐个 query 值调用 `UnmarshalText` 后写回字段
 - 自定义命名类型切片: 只有实现 `encoding.TextUnmarshaler` 的自定义命名类型切片会被静态 query 绑定支持；不实现该接口的命名类型切片会在生成阶段报错

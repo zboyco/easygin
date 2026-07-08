@@ -361,9 +361,19 @@ func main() {
 
 - `in`: 参数来源，支持 "path", "query", "header", "body"
 - `name`: 参数名称，支持添加 ",omitempty" 后缀表示可选参数
-- `default`: 参数默认值，当参数为空且设置了"omitempty"时使用
+- `default`: 参数默认值，当参数缺失且设置了"omitempty"时使用；显式传入空字符串不会触发默认值
 - `desc`: 参数描述，用于生成OpenAPI文档
 - `mime`: 用于 body 参数，指定 MIME 类型，支持 "multipart" 表示表单上传
+
+### 必填、空值与默认值语义
+
+easygin 对参数必填性的判断基于 **presence**：只判断客户端是否提供了该字段或参数，不把显式零值当作缺失。
+
+- 未添加 `omitempty` 的字段为必填；添加 `omitempty` 后允许缺失。
+- `default` 只在字段或参数缺失时生效；显式传入空字符串、`0`、`false` 等值不会触发默认值。
+- `?name=`、空 header、multipart/form 中的 `name=` 会被视为已提供；如果目标类型是 `string` 或 `*string`，会绑定为空字符串。
+- `?age=` 这类空字符串绑定到 `int`、`bool`、`time.Time` 等非字符串类型时，会通过必填检查，但在类型转换阶段返回错误。
+- JSON body 中显式提供的 `0`、`false`、`""` 会被视为已提供；JSON `null` 仍按缺失处理。
 
 ### Multipart 表单内存限制
 
@@ -379,7 +389,7 @@ limit := easygin.GetMultipartMemoryLimit()
 
 默认情况下，Multipart 表单的内存限制为 100MB。可以通过 `SetMultipartMemoryLimit` 函数进行调整，参数为字节大小。该函数是并发安全的，可以在程序运行时动态调整。
 
-> 注意：该配置作用于运行时反射绑定。当前生成的静态 multipart 绑定代码仍使用固定的 `1 << 30` 作为 `ParseMultipartForm` 内存限制。
+> 注意：该配置同时作用于运行时反射绑定和当前生成的静态 multipart 绑定代码。
 
 ### JSON 参数标签处理
 
@@ -395,7 +405,7 @@ enabled := easygin.HandleBodyJsonOmitEmptyAndDefault()
 
 默认情况下，此功能是关闭的（`false`），因为启用后会使用反射处理 JSON 标签，会对性能产生一定影响。启用后，系统会：
 
-- 处理 `omitempty` 标签：标记字段为可选，不校验是否为空值。如果没有 `omitempty` 标签，则该字段为必填，如果为空会报错
+- 处理 `omitempty` 标签：标记字段为可选，不校验是否缺失。如果没有 `omitempty` 标签，则该字段为必填；显式传入零值或空字符串会被视为已提供，JSON `null` 仍按缺失处理
 - 处理 `default` 标签：当字段未提供时，使用标签中指定的默认值
 
 该功能是并发安全的，可以在程序运行时动态调整。

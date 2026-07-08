@@ -93,6 +93,79 @@ func TestDecodeMultipartFormRequiredAllowsExplicitZeroValues(t *testing.T) {
 	}
 }
 
+// TestDecodeMultipartFormPresenceSemantics 验证 multipart/form 按字段是否出现处理必填和默认值。
+func TestDecodeMultipartFormPresenceSemantics(t *testing.T) {
+	t.Run("explicit empty string is present", func(t *testing.T) {
+		type payload struct {
+			Name     string  `name:"name"`
+			Optional string  `name:"optional,omitempty" default:"fallback"`
+			Pointer  *string `name:"pointer"`
+			Age      int     `name:"age,omitempty" default:"18"`
+		}
+
+		var got payload
+		form := &multipart.Form{
+			Value: map[string][]string{
+				"name":     {""},
+				"optional": {""},
+				"pointer":  {""},
+			},
+		}
+
+		if err := decodeMultipartForm(form, &got); err != nil {
+			t.Fatalf("explicit empty form fields should be treated as present, got error: %v", err)
+		}
+		if got.Name != "" {
+			t.Fatalf("expected empty name, got %q", got.Name)
+		}
+		if got.Optional != "" {
+			t.Fatalf("expected explicit empty optional value to skip default, got %q", got.Optional)
+		}
+		if got.Pointer == nil || *got.Pointer != "" {
+			t.Fatalf("expected pointer to explicit empty string, got %#v", got.Pointer)
+		}
+		if got.Age != 18 {
+			t.Fatalf("expected missing age to use default 18, got %d", got.Age)
+		}
+	})
+
+	t.Run("empty non-string value is conversion error", func(t *testing.T) {
+		type payload struct {
+			Age int `name:"age"`
+		}
+
+		var got payload
+		form := &multipart.Form{
+			Value: map[string][]string{
+				"age": {""},
+			},
+		}
+
+		err := decodeMultipartForm(form, &got)
+		if err == nil {
+			t.Fatal("expected empty integer form field to fail conversion")
+		}
+		if !strings.Contains(err.Error(), "invalid parameter 'age'") {
+			t.Fatalf("expected invalid parameter error, got: %v", err)
+		}
+	})
+
+	t.Run("missing required slice is missing", func(t *testing.T) {
+		type payload struct {
+			Tags []string `name:"tags"`
+		}
+
+		var got payload
+		err := decodeMultipartForm(&multipart.Form{Value: map[string][]string{}}, &got)
+		if err == nil {
+			t.Fatal("expected missing required form slice to fail")
+		}
+		if !strings.Contains(err.Error(), "missing required parameter 'tags' in form") {
+			t.Fatalf("expected missing required slice error, got: %v", err)
+		}
+	})
+}
+
 // TestSetFieldValueRejectsNarrowIntegerOverflow 验证窄数值类型溢出应返回错误而不是 panic 或截断。
 func TestSetFieldValueRejectsNarrowIntegerOverflow(t *testing.T) {
 	tests := []struct {
@@ -279,6 +352,56 @@ func TestBindParamsInitializesEmbeddedPointerFields(t *testing.T) {
 		}
 	})
 
+	t.Run("QueryAndHeaderPresenceWithEmptyValues", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/presence?query=&defaultQuery=&pointer=", nil)
+		req.Header.Set("X-Required", "")
+		req.Header.Set("X-Default", "")
+
+		bound := bindHandlerForTest(t, &TestPresenceHandler{}, req, nil).(*TestPresenceHandler)
+
+		if bound.Query != "" {
+			t.Fatalf("expected explicit empty query value, got %q", bound.Query)
+		}
+		if bound.DefaultQuery != "" {
+			t.Fatalf("expected explicit empty query to skip default, got %q", bound.DefaultQuery)
+		}
+		if bound.Header != "" {
+			t.Fatalf("expected explicit empty header value, got %q", bound.Header)
+		}
+		if bound.DefaultHeader != "" {
+			t.Fatalf("expected explicit empty header to skip default, got %q", bound.DefaultHeader)
+		}
+		if bound.Pointer == nil || *bound.Pointer != "" {
+			t.Fatalf("expected pointer to explicit empty string, got %#v", bound.Pointer)
+		}
+	})
+
+	t.Run("MissingValuesStillUseDefaults", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/presence?query=ok&pointer=value", nil)
+		req.Header.Set("X-Required", "header")
+
+		bound := bindHandlerForTest(t, &TestPresenceHandler{}, req, nil).(*TestPresenceHandler)
+
+		if bound.DefaultQuery != "fallback" {
+			t.Fatalf("expected missing query to use default, got %q", bound.DefaultQuery)
+		}
+		if bound.DefaultHeader != "trace" {
+			t.Fatalf("expected missing header to use default, got %q", bound.DefaultHeader)
+		}
+	})
+
+	t.Run("EmptyNonStringQueryFailsConversion", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/presence?age=", nil)
+
+		err := bindHandlerErrorForTest(t, &TestEmptyIntQueryHandler{}, req, nil)
+		if err == nil {
+			t.Fatal("expected empty integer query to fail conversion")
+		}
+		if !strings.Contains(err.Error(), "invalid parameter 'age'") {
+			t.Fatalf("expected invalid parameter error, got: %v", err)
+		}
+	})
+
 	t.Run("MultipartBodyAndQuery", func(t *testing.T) {
 		body := &bytes.Buffer{}
 		writer := multipart.NewWriter(body)
@@ -375,6 +498,21 @@ func bindHandlerForTest(t *testing.T, handler RouterHandler, req *http.Request, 
 	return newHandler
 }
 
+func bindHandlerErrorForTest(t *testing.T, handler RouterHandler, req *http.Request, customize func(*gin.Context)) error {
+	t.Helper()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = req
+
+	if customize != nil {
+		customize(ctx)
+	}
+
+	_, err := bindParams(ctx, handler)
+	return err
+}
+
 type TestEmbeddedPointerHandler struct {
 	*TestLevelOne
 	Body *TestBodyPayload `in:"body"`
@@ -427,6 +565,18 @@ type TestBodyDefaultPayload struct {
 type TestOptionalQueryHandler struct {
 	Required string `in:"query" name:"req"`
 	Optional string `in:"query" name:"optional,omitempty"`
+}
+
+type TestPresenceHandler struct {
+	Query         string  `in:"query" name:"query"`
+	DefaultQuery  string  `in:"query" name:"defaultQuery,omitempty" default:"fallback"`
+	Pointer       *string `in:"query" name:"pointer"`
+	Header        string  `in:"header" name:"X-Required"`
+	DefaultHeader string  `in:"header" name:"X-Default,omitempty" default:"trace"`
+}
+
+type TestEmptyIntQueryHandler struct {
+	Age int `in:"query" name:"age"`
 }
 
 type TestPathHeaderHandler struct {
@@ -492,6 +642,14 @@ func (h *TestBodyValueHandler) Output(ctx context.Context) (any, error) {
 }
 
 func (h *TestOptionalQueryHandler) Output(ctx context.Context) (any, error) {
+	return nil, nil
+}
+
+func (h *TestPresenceHandler) Output(ctx context.Context) (any, error) {
+	return nil, nil
+}
+
+func (h *TestEmptyIntQueryHandler) Output(ctx context.Context) (any, error) {
 	return nil, nil
 }
 
