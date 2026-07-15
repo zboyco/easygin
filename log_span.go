@@ -3,10 +3,12 @@ package easygin
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/zboyco/easygin/logr"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -79,7 +81,11 @@ type spanLogger struct {
 }
 
 func (t *spanLogger) Start(ctx context.Context, name string, keyAndValues ...interface{}) (context.Context, logr.Logger) {
-	childCtx, childSpan := t.span.TracerProvider().Tracer(t.serviceName).Start(
+	provider := otel.GetTracerProvider()
+	if t != nil && t.span != nil {
+		provider = t.span.TracerProvider()
+	}
+	childCtx, childSpan := provider.Tracer(t.serviceName).Start(
 		ctx, name,
 		trace.WithAttributes(attrsFromKeyAndValues(keyAndValues...)...),
 		trace.WithTimestamp(time.Now()),
@@ -101,7 +107,7 @@ func (t *spanLogger) End() {
 func (t *spanLogger) WithValues(keyAndValues ...interface{}) logr.Logger {
 	attributes := make([]attribute.KeyValue, len(t.attributes), len(t.attributes)+len(keyAndValues)/2)
 	copy(attributes, t.attributes)
-	attributes = append(attributes, attrsFromKeyAndValues(keyAndValues...)...)
+	attributes = appendAttrsFromKeyAndValues(attributes, keyAndValues...)
 	return &spanLogger{
 		serviceName: t.serviceName,
 		span:        t.span,
@@ -109,59 +115,86 @@ func (t *spanLogger) WithValues(keyAndValues ...interface{}) logr.Logger {
 	}
 }
 
-func (t *spanLogger) info(level zerolog.Level, msg fmt.Stringer) {
+// info 在服务端级别过滤通过后格式化并记录普通日志。
+func (t *spanLogger) info(level zerolog.Level, msgOrFormat string, args ...interface{}) {
 	if level < globalLogLevel {
 		return
 	}
-	if t.span == nil || !t.span.IsRecording() {
-		return
+
+	message := msgOrFormat
+	if len(args) > 0 {
+		message = fmt.Sprintf(msgOrFormat, args...)
 	}
-
-	t.span.SetStatus(codes.Ok, "")
-
-	t.span.AddEvent(
-		"@"+level.String(),
-		trace.WithTimestamp(time.Now()),
-		trace.WithAttributes(t.attributes...),
-		trace.WithAttributes(
-			attribute.Stringer("message", msg),
-		),
-	)
+	t.logEvent(level).Str("msg", message).Send()
+	if t.span != nil && t.span.IsRecording() {
+		t.span.AddEvent(
+			"log."+level.String(),
+			trace.WithTimestamp(time.Now()),
+			trace.WithAttributes(t.attributes...),
+			trace.WithAttributes(attribute.String("message", message)),
+		)
+	}
 }
 
+// error 记录错误日志，并将同一份错误堆栈复用于 zerolog 和 recording Span。
 func (t *spanLogger) error(level zerolog.Level, err error) {
-	if level < globalLogLevel {
+	if level < globalLogLevel || err == nil {
 		return
 	}
 
-	if t.span == nil || err == nil || !t.span.IsRecording() {
+	event := t.logEvent(level).Str("msg", err.Error())
+	var stack string
+	if level >= zerolog.ErrorLevel {
+		stack = fmt.Sprintf("%+v", err)
+		event = event.Str("stack", stack)
+	}
+	event.Send()
+
+	if t.span == nil || !t.span.IsRecording() {
 		return
 	}
 
 	attributes := make([]attribute.KeyValue, len(t.attributes), len(t.attributes)+2)
 	copy(attributes, t.attributes)
 	attributes = append(attributes, attribute.String("message", err.Error()))
-
 	if level >= zerolog.ErrorLevel {
-		attributes = append(attributes, attribute.String("stack", fmt.Sprintf("%+v", err)))
+		attributes = append(attributes, attribute.String("stack", stack))
+		t.span.SetStatus(codes.Error, "")
 	}
-
-	t.span.SetStatus(codes.Error, "")
-
 	t.span.RecordError(err)
 	t.span.AddEvent(
-		"@"+level.String(),
+		"log."+level.String(),
 		trace.WithTimestamp(time.Now()),
 		trace.WithAttributes(attributes...),
 	)
 }
 
+// logEvent 创建携带结构化字段和 Trace 关联信息的 zerolog 事件。
+func (t *spanLogger) logEvent(level zerolog.Level) *zerolog.Event {
+	logger := zerolog.New(os.Stderr)
+	event := logger.WithLevel(level).Timestamp()
+	for _, field := range t.attributes {
+		event = event.Str(string(field.Key), field.Value.AsString())
+	}
+	if t.span == nil {
+		return event
+	}
+	spanContext := t.span.SpanContext()
+	if spanContext.HasTraceID() {
+		event = event.Str("traceID", spanContext.TraceID().String())
+	}
+	if spanContext.HasSpanID() {
+		event = event.Str("spanID", spanContext.SpanID().String())
+	}
+	return event
+}
+
 func (t *spanLogger) Debug(msgOrFormat string, args ...interface{}) {
-	t.info(zerolog.DebugLevel, Sprintf(msgOrFormat, args...))
+	t.info(zerolog.DebugLevel, msgOrFormat, args...)
 }
 
 func (t *spanLogger) Info(msgOrFormat string, args ...interface{}) {
-	t.info(zerolog.InfoLevel, Sprintf(msgOrFormat, args...))
+	t.info(zerolog.InfoLevel, msgOrFormat, args...)
 }
 
 func (t *spanLogger) Warn(err error) {
@@ -172,20 +205,24 @@ func (t *spanLogger) Error(err error) {
 	t.error(zerolog.ErrorLevel, err)
 }
 
+// attrsFromKeyAndValues 将合法键值对规范化为字符串属性，并忽略非字符串 key。
 func attrsFromKeyAndValues(keysAndValues ...interface{}) []attribute.KeyValue {
+	return appendAttrsFromKeyAndValues(nil, keysAndValues...)
+}
+
+// appendAttrsFromKeyAndValues 将合法键值对直接追加到目标切片，避免 WithValues 创建临时属性切片。
+func appendAttrsFromKeyAndValues(attributes []attribute.KeyValue, keysAndValues ...interface{}) []attribute.KeyValue {
 	n := len(keysAndValues)
 	if n > 0 && n%2 == 0 {
-		fields := make([]attribute.KeyValue, len(keysAndValues)/2)
-		for i := range fields {
-			k, v := keysAndValues[2*i], keysAndValues[2*i+1]
-
-			if s, ok := k.(string); ok {
-				fields[i] = attribute.String(s, fmt.Sprint(v))
+		for i := 0; i < n; i += 2 {
+			key, ok := keysAndValues[i].(string)
+			if !ok {
+				continue
 			}
+			attributes = append(attributes, attribute.String(key, fmt.Sprint(keysAndValues[i+1])))
 		}
-		return fields
 	}
-	return nil
+	return attributes
 }
 
 func Sprintf(format string, args ...interface{}) fmt.Stringer {

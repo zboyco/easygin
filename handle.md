@@ -21,7 +21,7 @@
 
 ### 响应类型
 - `WithStatusCode`: 自定义状态码的响应
-  - `StatusCode`: HTTP状态码
+  - `StatusCode`: 仅接受 200-599；非法值或 nil `*WithStatusCode` 统一降级为 500
   - `Output`: 响应内容
 - `AttachmentFromFile`: 文件附件响应
   - `Disposition`: 内联或附件
@@ -37,17 +37,18 @@
 
 ## 主要函数索引
 
-### 1. handleErrorWithPolicy / handleRecoveryErrorWithPolicy / writeInternalServerError
+### 1. handleErrorWithPolicy / handleRecoveryErrorWithPolicy / writeAPIError
 - 签名: `func handleErrorWithPolicy(c *gin.Context, err error, exposeDetails bool)`
 - 签名: `func handleRecoveryErrorWithPolicy(c *gin.Context, err error, exposeDetails bool)`
-- 签名: `func writeInternalServerError(c *gin.Context, message string)`
+- 签名: `func writeAPIError(c *gin.Context, statusCode int, message, description string)`
 - 功能: 按服务器错误详情策略生成统一错误响应
 - 处理内容:
-  1. 使用 `errors.As` 识别包装后的 `ErrorHttp`；非 5xx 业务错误始终保留业务状态码、消息和描述
-  2. 普通内部错误在关闭详情时返回通用 `500 Internal Server Error`；5xx `ErrorHttp` 保留有效状态码，但消息和描述替换为对应标准 HTTP 文本
-  3. Recovery 无论 panic 值是否实现 `ErrorHttp` 都返回 HTTP 500，不会转换为业务状态码
-  4. Recovery 在关闭详情时隐藏 panic 内容；允许详情时沿用旧版结构，将 panic 文本写入 `desc`
-  5. 原始错误写入 `gin.Context.Errors`，供访问日志和 OpenTelemetry 记录
+  1. 使用 `errors.As` 识别包装后的非 nil `ErrorHttp`；typed nil 会按内部错误处理
+  2. `ErrorHttp` 只接受 400-599；非法状态码统一返回固定 500
+  3. 4xx 业务错误保留业务状态码、消息和描述；普通内部错误和 5xx 默认隐藏详情
+  4. Recovery 无论 panic 值是否实现 `ErrorHttp` 都返回 HTTP 500，不会转换为业务状态码
+  5. 所有框架错误固定输出 `code`、`msg`、`desc` 三个 JSON 字段
+  6. 原始错误写入 `gin.Context.Errors`，供访问日志和 OpenTelemetry 记录
 
 ### 2. parseTime
 - 签名: `func parseTime(val string, tagName string) (time.Time, error)`
@@ -123,7 +124,7 @@
 - 处理内容:
   1. 将handlerName存入context
   2. 调用handleRouter处理请求
-  3. 处理自定义状态码
+  3. 校验自定义状态码必须位于 200-599；nil 指针或非法值按内部错误返回 500
   4. 根据返回值类型生成不同的响应
   5. 支持多种响应类型 (JSON, 字符串, 重定向, 文件)
   6. 文件响应通过 `contentDisposition` 设置符合 MIME 参数转义规则的 `Content-Disposition`
@@ -185,7 +186,7 @@
 ### 3. 特殊处理
 - multipart表单: 解析表单数据，处理文件上传；完整请求处理链结束后统一调用 `MultipartForm.RemoveAll` 清理落盘临时文件
 - JSON请求体: 解析JSON数据，支持嵌套结构；连续多个 JSON 值会被 `decodeJSON` 拒绝
-- 请求体上限: 配置 `WithMaxBodyBytes` 后，JSON 和 multipart 读取超限会通过错误链识别并返回 HTTP 413
+- 请求体上限: v0.2.0 默认限制为 10 MiB；JSON 和 multipart 读取超限会通过错误链识别并返回 HTTP 413，`WithMaxBodyBytes(0)` 可显式关闭
 - 时间类型: 特殊处理时间格式
 - 指针类型: 缺失的可选参数保持 nil；显式空字符串绑定到 `*string` 时会得到非 nil 的空字符串指针
 - presence 语义: query 使用 `GetQuery` 区分缺失和空值，header 使用请求头 key 是否存在区分缺失和空值；default 只在参数缺失时生效
@@ -197,17 +198,17 @@
 - 字符串响应: 返回纯文本
 - 重定向: 返回URL或*URL类型
 - 文件下载: 返回AttachmentFromFile或AttachmentFromReader类型
-- 自定义状态码: 使用WithStatusCode包装其他响应类型
+- 自定义状态码: 使用 `WithStatusCode` 包装其他响应类型
 
 ### 2. 生成过程
 1. 调用RouterHandler的Output方法获取返回值
-2. 检查是否为WithStatusCode类型，提取状态码和实际输出
+2. 检查是否为 `WithStatusCode` 或 `*WithStatusCode`，拒绝 nil 指针并校验状态码位于 200-599
 3. 根据输出类型生成不同的HTTP响应
 4. 处理nil返回值，返回204 No Content或自定义状态码
 
 ### 3. 特殊处理
 - 文件响应: 设置 `Content-Disposition` 头，文件名按 MIME 参数规则转义，支持包含引号或非 ASCII 字符的文件名
-- 流式响应: 使用DataFromReader处理大文件或流式数据
+- 流式响应: 使用 `DataFromReader` 处理大文件或流式数据；默认 `WriteTimeout` 为 60 秒，长时间写入需要按场景调整
 - 资源管理: 自动关闭实现了io.Closer接口的文件资源
 - 错误处理: 统一格式的错误响应
 
@@ -262,6 +263,8 @@
   - `StatusCode()`: 返回HTTP状态码
   - `Error()`: 返回错误消息
   - `Desc()`: 返回错误描述
+  - 合法状态码范围为 400-599；包装后的实现可通过 `errors.As` 识别，typed nil 不视为有效错误
+  - `IsErrorHttp` 仅在错误链包含非 nil 且状态码位于 400-599 的实现时返回 true
 
 ### 错误响应格式
 - `code`: HTTP状态码
@@ -273,7 +276,8 @@
 - 参数类型转换错误
 - 请求体解析错误
 - 内部服务器错误
-- 关闭错误详情时，普通错误返回通用 500，5xx `ErrorHttp` 保留有效状态码并隐藏详情；非 5xx `ErrorHttp` 保留业务响应
+- 默认关闭错误详情：普通错误返回通用 500，5xx `ErrorHttp` 保留有效状态码并隐藏详情；4xx `ErrorHttp` 保留业务响应
+- 非法 `ErrorHttp` 状态码、typed-nil 错误、nil `*WithStatusCode` 和非法自定义响应状态码都返回固定 500
 - 请求体超过服务器配置上限时返回 HTTP 413
 - Recovery 始终返回 HTTP 500；关闭错误详情时不会返回 panic 文本或 panic 中的 `ErrorHttp` 详情
 

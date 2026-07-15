@@ -1,12 +1,21 @@
 package easygin
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+	"reflect"
+)
 
 type ErrorHttp interface {
 	StatusCode() int
 	Error() string
 	Desc() string
 }
+
+const (
+	minErrorHTTPStatus = 400
+	maxErrorHTTPStatus = 599
+)
 
 type Error struct {
 	C   int    `json:"code" desc:"状态码"`
@@ -126,7 +135,39 @@ func (e *Error) Unwrap() error {
 	return e.err
 }
 
+// asErrorHTTP 从错误链中提取非 nil 的 ErrorHttp。
+func asErrorHTTP(err error) (ErrorHttp, bool) {
+	if err == nil {
+		return nil, false
+	}
+	var target ErrorHttp
+	if !errors.As(err, &target) || isNilInterfaceValue(target) {
+		return nil, false
+	}
+	return target, true
+}
+
+// isNilInterfaceValue 判断接口是否为 nil 或包含 typed-nil 值。
+func isNilInterfaceValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
+}
+
+// isValidErrorHTTPStatus 判断状态码是否属于严格错误响应范围。
+func isValidErrorHTTPStatus(statusCode int) bool {
+	return statusCode >= minErrorHTTPStatus && statusCode <= maxErrorHTTPStatus
+}
+
+// IsErrorHttp 判断错误链中是否包含有效的非 nil ErrorHttp。
 func IsErrorHttp(err error) bool {
-	_, ok := err.(ErrorHttp)
-	return ok
+	errorHTTP, ok := asErrorHTTP(err)
+	return ok && isValidErrorHTTPStatus(errorHTTP.StatusCode())
 }

@@ -193,6 +193,20 @@ func TestGeneratedMiddlewareUsesCtxParameter(t *testing.T) {
 	}
 }
 
+// TestGeneratedMainRequiresExplicitTelemetrySetup 验证脚手架不会替应用自动安装 OpenTelemetry Provider。
+func TestGeneratedMainRequiresExplicitTelemetrySetup(t *testing.T) {
+	t.Parallel()
+
+	projectDir := writeTestProject(t)
+	content := readGeneratedFile(t, projectDir, "cmd/srv-demo/main.go")
+	if strings.Contains(content, "InitGlobalTracerProvider") {
+		t.Fatalf("generated main must not initialize OpenTelemetry automatically:\n%s", content)
+	}
+	if !strings.Contains(content, "easygin.SetLogLevel") {
+		t.Fatalf("generated main should keep explicit log level configuration:\n%s", content)
+	}
+}
+
 func TestGeneratedListTemplatesIncludeQueryParameters(t *testing.T) {
 	t.Parallel()
 

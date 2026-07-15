@@ -30,37 +30,41 @@ type fieldInfo struct {
 // structFields 缓存结构体的字段信息
 var structFields sync.Map
 
+// apiErrorResponse 定义 easygin 严格错误响应的固定 JSON 契约。
+type apiErrorResponse struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+	Desc string `json:"desc"`
+}
+
 // handleErrorWithPolicy 根据错误详情策略生成统一错误响应；关闭详情时会隐藏 5xx ErrorHttp 内容。
 func handleErrorWithPolicy(c *gin.Context, err error, exposeDetails bool) {
 	if err == nil {
 		return
 	}
+	if isNilInterfaceValue(err) {
+		err = fmt.Errorf("typed-nil error")
+	}
 	// 将错误添加到 gin.Context 的 Errors 中
 	_ = c.Error(err)
 
-	var errorHttp ErrorHttp
-	if errors.As(err, &errorHttp) {
+	if errorHttp, ok := asErrorHTTP(err); ok {
 		statusCode := errorHttp.StatusCode()
+		if !isValidErrorHTTPStatus(statusCode) {
+			_ = c.Error(fmt.Errorf("invalid ErrorHttp status code %d", statusCode))
+			writeInternalServerError(c, http.StatusText(http.StatusInternalServerError))
+			return
+		}
 		if statusCode < http.StatusInternalServerError || exposeDetails {
-			resp := gin.H{
-				"code": statusCode,
-				"msg":  errorHttp.Error(),
-				"desc": errorHttp.Desc(),
-			}
-			c.AbortWithStatusJSON(statusCode, resp)
+			writeAPIError(c, statusCode, errorHttp.Error(), errorHttp.Desc())
 			return
 		}
 
 		message := http.StatusText(statusCode)
 		if message == "" {
-			statusCode = http.StatusInternalServerError
-			message = http.StatusText(statusCode)
+			message = http.StatusText(http.StatusInternalServerError)
 		}
-		c.AbortWithStatusJSON(statusCode, gin.H{
-			"code": statusCode,
-			"msg":  message,
-			"desc": message,
-		})
+		writeAPIError(c, statusCode, message, message)
 		return
 	}
 
@@ -82,19 +86,25 @@ func handleRecoveryErrorWithPolicy(c *gin.Context, err error, exposeDetails bool
 	if exposeDetails {
 		description = err.Error()
 	}
-	c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-		"code": http.StatusInternalServerError,
-		"msg":  http.StatusText(http.StatusInternalServerError),
-		"desc": description,
-	})
+	writeAPIError(c, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError), description)
 }
 
 // writeInternalServerError 写入不包含内部错误详情的通用 500 响应。
 func writeInternalServerError(c *gin.Context, message string) {
-	c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-		"code": http.StatusInternalServerError,
-		"msg":  message,
-		"desc": "Internal Server Error",
+	writeAPIError(c, http.StatusInternalServerError, message, http.StatusText(http.StatusInternalServerError))
+}
+
+// writeAPIError 按固定契约写出已校验的 HTTP 错误响应。
+func writeAPIError(c *gin.Context, statusCode int, message, description string) {
+	if !isValidErrorHTTPStatus(statusCode) {
+		statusCode = http.StatusInternalServerError
+		message = http.StatusText(statusCode)
+		description = message
+	}
+	c.AbortWithStatusJSON(statusCode, apiErrorResponse{
+		Code: statusCode,
+		Msg:  message,
+		Desc: description,
 	})
 }
 
@@ -467,10 +477,18 @@ func renderAPIWithPolicy(h RouterHandler, handlerName string, exposeErrorDetails
 			output = v.Output
 			withStatusCode = true
 		case *WithStatusCode:
+			if v == nil {
+				handleErrorWithPolicy(c, fmt.Errorf("WithStatusCode is nil"), exposeErrorDetails)
+				return
+			}
 			code = v.StatusCode
 			output = v.Output
 			withStatusCode = true
 		default:
+		}
+		if withStatusCode && !isValidResponseStatusCode(code) {
+			handleErrorWithPolicy(c, fmt.Errorf("invalid response status code %d", code), exposeErrorDetails)
+			return
 		}
 
 		if output == nil {
@@ -521,6 +539,11 @@ func renderAPIWithPolicy(h RouterHandler, handlerName string, exposeErrorDetails
 			c.JSON(code, output)
 		}
 	}
+}
+
+// isValidResponseStatusCode 判断状态码是否可用于 easygin 最终响应。
+func isValidResponseStatusCode(statusCode int) bool {
+	return statusCode >= http.StatusOK && statusCode <= maxErrorHTTPStatus
 }
 
 // contentDisposition 生成符合 MIME 参数转义规则的 Content-Disposition 响应头。

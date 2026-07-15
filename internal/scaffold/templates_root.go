@@ -123,7 +123,6 @@ import (
 )
 
 func main() {
-	easygin.InitGlobalTracerProvider(global.ServiceName)
 	easygin.SetLogLevel(easygin.DebugLevel)
 
 	srv := easygin.NewServer(global.ServiceName, global.ListenAddr, global.Debug)

@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog"
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -35,6 +34,19 @@ type testErrorResponse struct {
 // testClosedListener 提供固定地址并立即返回 Accept 错误，避免生命周期测试占用真实端口。
 type testClosedListener struct {
 	address net.Addr
+}
+
+// repeatedByteReader 持续生成固定字节，用于测试默认 Body 上限而不分配完整请求体。
+type repeatedByteReader struct {
+	value byte
+}
+
+// Read 使用固定字节填满目标缓冲区。
+func (r *repeatedByteReader) Read(buffer []byte) (int, error) {
+	for i := range buffer {
+		buffer[i] = r.value
+	}
+	return len(buffer), nil
 }
 
 // Accept 模拟已经关闭的 Listener。
@@ -62,38 +74,62 @@ func decodeTestErrorResponse(t *testing.T, body *bytes.Buffer) testErrorResponse
 	return response
 }
 
-// TestNewServerWithOptions 验证 v0.1.36 配置入口及默认兼容行为。
+// TestNewServerWithOptions 验证 v0.2.0 严格默认值和显式覆盖行为。
 func TestNewServerWithOptions(t *testing.T) {
 	server, err := NewServerWithOptions(
 		"test",
 		":0",
 		false,
 		WithMaxBodyBytes(128),
-		WithExposeErrorDetails(false),
-		WithAllowClientLogLevel(false),
-		WithRedactQueryParameters("Token", " authorization "),
+		WithExposeErrorDetails(true),
+		WithRedactQueryParameters(" custom_secret "),
 		WithTracerProvider(noop.NewTracerProvider()),
 		WithHTTPTimeouts(time.Second, 2*time.Second, 3*time.Second, 4*time.Second),
 	)
 	if err != nil {
 		t.Fatalf("NewServerWithOptions returned error: %v", err)
 	}
-	if server.options.maxBodyBytes != 128 || server.options.exposeErrorDetails || server.options.allowClientLogLevel {
+	if server.options.maxBodyBytes != 128 || !server.options.exposeErrorDetails {
 		t.Fatalf("unexpected server options: %+v", server.options)
 	}
-	if _, ok := server.options.redactQueryParameters["token"]; !ok {
-		t.Fatalf("token is not configured for redaction: %#v", server.options.redactQueryParameters)
+	for _, name := range append(append([]string(nil), defaultRedactedQueryParameters...), "custom_secret") {
+		if _, ok := server.options.redactQueryParameters[name]; !ok {
+			t.Fatalf("sensitive query parameter %q is not configured: %#v", name, server.options.redactQueryParameters)
+		}
 	}
-	if _, ok := server.options.redactQueryParameters["authorization"]; !ok {
-		t.Fatalf("authorization is not configured for redaction: %#v", server.options.redactQueryParameters)
-	}
-	if server.options.readHeaderTimeout != time.Second || server.options.idleTimeout != 4*time.Second {
+	if server.options.readHeaderTimeout != time.Second || server.options.readTimeout != 2*time.Second || server.options.writeTimeout != 3*time.Second || server.options.idleTimeout != 4*time.Second {
 		t.Fatalf("unexpected timeout options: %+v", server.options)
 	}
 
-	legacy := NewServer("test", ":0", false)
-	if legacy.options.maxBodyBytes != 0 || !legacy.options.exposeErrorDetails || !legacy.options.allowClientLogLevel {
-		t.Fatalf("NewServer compatibility defaults changed: %+v", legacy.options)
+	strict := NewServer("test", ":0", false)
+	if strict.options.maxBodyBytes != defaultMaxBodyBytes || strict.options.exposeErrorDetails {
+		t.Fatalf("NewServer strict defaults = %+v", strict.options)
+	}
+	if strict.options.readHeaderTimeout != defaultReadHeaderTimeout || strict.options.readTimeout != defaultReadTimeout || strict.options.writeTimeout != defaultWriteTimeout || strict.options.idleTimeout != defaultIdleTimeout {
+		t.Fatalf("NewServer timeout defaults = %+v", strict.options)
+	}
+	for _, name := range defaultRedactedQueryParameters {
+		if _, ok := strict.options.redactQueryParameters[name]; !ok {
+			t.Fatalf("default sensitive query parameter %q is missing: %#v", name, strict.options.redactQueryParameters)
+		}
+	}
+
+	unsafeServer, err := NewServerWithOptions("test", ":0", false,
+		WithMaxBodyBytes(0),
+		WithExposeErrorDetails(true),
+		WithHTTPTimeouts(0, 0, 0, 0),
+	)
+	if err != nil {
+		t.Fatalf("create explicitly unsafe server: %v", err)
+	}
+	if unsafeServer.options.maxBodyBytes != 0 || !unsafeServer.options.exposeErrorDetails || unsafeServer.options.readHeaderTimeout != 0 || unsafeServer.options.readTimeout != 0 || unsafeServer.options.writeTimeout != 0 || unsafeServer.options.idleTimeout != 0 {
+		t.Fatalf("explicit unsafe overrides = %+v", unsafeServer.options)
+	}
+
+	strict.options.redactQueryParameters["server_a_only"] = struct{}{}
+	other := NewServer("test", ":0", false)
+	if _, ok := other.options.redactQueryParameters["server_a_only"]; ok {
+		t.Fatalf("redaction maps are shared across servers: %#v", other.options.redactQueryParameters)
 	}
 }
 
@@ -134,6 +170,24 @@ func TestMaxBodyBytesReturns413(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"too long","count":1}`))
 	server.engine.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+// TestDefaultMaxBodyBytesReturns413 验证 NewServer 默认启用 10 MiB Body 限制。
+func TestDefaultMaxBodyBytesReturns413(t *testing.T) {
+	server := NewServer("test", ":0", false)
+	group := NewRouterGroup("/")
+	group.RegisterAPI(&testBodyLimitAPI{})
+	if err := server.Setup(group); err != nil {
+		t.Fatalf("Setup returned error: %v", err)
+	}
+
+	body := io.LimitReader(&repeatedByteReader{value: ' '}, defaultMaxBodyBytes+1)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/", body)
+	server.engine.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413; body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -202,8 +256,10 @@ func TestMaxBodyBytesMultipartReturns413(t *testing.T) {
 	}
 }
 
-// TestErrorDetailsPolicy 验证普通错误和 5xx ErrorHttp 可脱敏，而非 5xx ErrorHttp 保留业务响应。
+// TestErrorDetailsPolicy 验证普通错误和 5xx ErrorHttp 可脱敏，而 4xx ErrorHttp 保留业务响应。
 func TestErrorDetailsPolicy(t *testing.T) {
+	var typedNilError *Error
+	var typedNil error = typedNilError
 	gin.SetMode(gin.TestMode)
 	for _, test := range []struct {
 		name          string
@@ -245,6 +301,29 @@ func TestErrorDetailsPolicy(t *testing.T) {
 			wantMsg:       "backend failed",
 			wantDesc:      "database password=secret",
 		},
+		{
+			name:       "status below error range is rejected",
+			err:        NewError(399, "invalid low", "secret low"),
+			wantStatus: http.StatusInternalServerError,
+			wantMsg:    http.StatusText(http.StatusInternalServerError),
+			wantDesc:   http.StatusText(http.StatusInternalServerError),
+			forbidden:  []string{"invalid low", "secret low"},
+		},
+		{
+			name:       "status above error range is rejected",
+			err:        fmt.Errorf("wrapped: %w", NewError(600, "invalid high", "secret high")),
+			wantStatus: http.StatusInternalServerError,
+			wantMsg:    http.StatusText(http.StatusInternalServerError),
+			wantDesc:   http.StatusText(http.StatusInternalServerError),
+			forbidden:  []string{"invalid high", "secret high"},
+		},
+		{
+			name:       "typed nil ErrorHttp is rejected",
+			err:        typedNil,
+			wantStatus: http.StatusInternalServerError,
+			wantMsg:    http.StatusText(http.StatusInternalServerError),
+			wantDesc:   http.StatusText(http.StatusInternalServerError),
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
@@ -263,6 +342,26 @@ func TestErrorDetailsPolicy(t *testing.T) {
 				}
 			}
 		})
+	}
+
+	if !IsErrorHttp(fmt.Errorf("wrapped: %w", NewError(http.StatusBadRequest, "bad", "request"))) {
+		t.Fatal("IsErrorHttp should recognize wrapped ErrorHttp")
+	}
+	if IsErrorHttp(typedNil) {
+		t.Fatal("IsErrorHttp should reject typed-nil ErrorHttp")
+	}
+	for _, test := range []struct {
+		status int
+		want   bool
+	}{
+		{status: 399, want: false},
+		{status: http.StatusBadRequest, want: true},
+		{status: maxErrorHTTPStatus, want: true},
+		{status: 600, want: false},
+	} {
+		if got := IsErrorHttp(NewError(test.status, "test", "test")); got != test.want {
+			t.Fatalf("IsErrorHttp status %d = %t, want %t", test.status, got, test.want)
+		}
 	}
 }
 
@@ -302,9 +401,12 @@ func TestRecoveryErrorDetailsPolicy(t *testing.T) {
 	}
 }
 
-// TestRecoveryCompatibilityDefaults 验证 NewServer 保留旧版 Recovery 的状态码和字段语义。
-func TestRecoveryCompatibilityDefaults(t *testing.T) {
-	server := NewServer("test", ":0", false)
+// TestRecoveryDetailsOptIn 验证显式开启详情时沿用旧版 Recovery 的状态码和字段语义。
+func TestRecoveryDetailsOptIn(t *testing.T) {
+	server, err := NewServerWithOptions("test", ":0", false, WithExposeErrorDetails(true))
+	if err != nil {
+		t.Fatalf("NewServerWithOptions returned error: %v", err)
+	}
 	group := NewRouterGroup("/")
 	group.RegisterAPI(&testPanicAPI{})
 	group.RegisterAPI(&testPanicErrorAPI{})
@@ -353,16 +455,8 @@ func (testPanicErrorAPI) Output(context.Context) (any, error) {
 	panic(NewError(http.StatusTeapot, "panic secret", "panic detail"))
 }
 
-// TestRequestLogSecurityControls 验证日志级别覆盖和查询参数脱敏。
+// TestRequestLogSecurityControls 验证默认查询参数脱敏。
 func TestRequestLogSecurityControls(t *testing.T) {
-	header := http.Header{"X-Log-Level": []string{"error"}}
-	if got := requestLogLevel(header, true); got != zerolog.ErrorLevel {
-		t.Fatalf("request log level = %s, want error", got)
-	}
-	if got := requestLogLevel(header, false); got != zerolog.TraceLevel {
-		t.Fatalf("disabled client override level = %s, want trace", got)
-	}
-
 	u := mustParseTestURL(t, "/users?token=secret&name=alice")
 	redacted := redactRequestURI(u, map[string]struct{}{"token": {}})
 	if redacted != "/users?name=alice" {
@@ -382,15 +476,49 @@ func TestRequestLogSecurityControls(t *testing.T) {
 	if got := redactRequestURI(encodedSensitive, map[string]struct{}{"token": {}, "access_token": {}}); got != "/users?name=alice" {
 		t.Fatalf("URI with encoded sensitive query = %q, want /users?name=alice", got)
 	}
+	malformedSensitive := mustParseTestURL(t, "/users?token=secret;scope=all&name=alice")
+	if got := redactRequestURI(malformedSensitive, map[string]struct{}{"token": {}}); got != "/users?name=alice" {
+		t.Fatalf("URI with malformed sensitive query = %q, want /users?name=alice", got)
+	}
+	if malformedSensitive.RawQuery != "token=secret;scope=all&name=alice" {
+		t.Fatalf("malformed original URL was modified: %q", malformedSensitive.RawQuery)
+	}
 
 	defaultOptions := defaultServerOptions()
 	if err := WithRedactQueryParameters()(&defaultOptions); err != nil {
 		t.Fatalf("WithRedactQueryParameters returned error: %v", err)
 	}
-	for _, name := range []string{"token", "access_token", "authorization", "api_key", "password"} {
+	for _, name := range defaultRedactedQueryParameters {
 		if _, ok := defaultOptions.redactQueryParameters[name]; !ok {
 			t.Fatalf("default sensitive query parameter %q is not configured: %#v", name, defaultOptions.redactQueryParameters)
 		}
+	}
+}
+
+// TestClientLogHeaderCannotSuppressAccessLog 验证客户端请求头不能关闭访问日志，且默认脱敏 Query。
+func TestClientLogHeaderCannotSuppressAccessLog(t *testing.T) {
+	server := NewServer("test", ":0", false)
+	group := NewRouterGroup("/")
+	group.RegisterAPI(&testAnyRoute{})
+	if err := server.Setup(group); err != nil {
+		t.Fatalf("Setup returned error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/any?token=secret;scope=all&name=alice", nil)
+	request.Header.Set("x-log-level", "disabled")
+	output := captureTestStderr(t, func() {
+		server.engine.ServeHTTP(recorder, request)
+	})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+	fields := decodeTestLogLine(t, output)
+	if fields["level"] != "info" || fields["tag"] != "access" || fields["request_uri"] != "/any?name=alice" {
+		t.Fatalf("unexpected access log fields: %#v", fields)
+	}
+	if strings.Contains(output, "secret") {
+		t.Fatalf("access log leaked sensitive query: %s", output)
 	}
 }
 
@@ -708,6 +836,7 @@ func BenchmarkRedactRequestURI(b *testing.B) {
 		{name: "no-query", u: &url.URL{Path: "/health"}},
 		{name: "no-sensitive", u: mustParseBenchmarkURL("/users?name=alice&page=1")},
 		{name: "sensitive", u: mustParseBenchmarkURL("/users?token=secret&name=alice")},
+		{name: "malformed-sensitive", u: mustParseBenchmarkURL("/users?token=secret;scope=all&name=alice")},
 	}
 	sensitiveNames := map[string]struct{}{"token": {}}
 	for _, test := range tests {

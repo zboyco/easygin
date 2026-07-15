@@ -5,8 +5,8 @@
 - 包名: `easygin`
 - `server.go`: 管理 Gin 引擎、路由注册、HTTP Server 生命周期、pprof 和上下文注入
 - `server_options.go`: 定义可选安全、日志、追踪和 HTTP 超时配置
-- 兼容入口: `NewServer` 保留 v0.1.x 默认行为
-- 安全入口: `NewServerWithOptions` 显式应用 `ServerOption`
+- 便捷入口: `NewServer` 使用 v0.2.0 严格默认值
+- 可配置入口: `NewServerWithOptions` 在严格默认值上应用 `ServerOption`
 
 ## 核心数据结构
 
@@ -35,19 +35,18 @@
 ### NewServer
 
 - 签名: `func NewServer(serviceName, addr string, debug bool) *Server`
-- 保留旧版本默认行为:
-  - 请求体不限制
-  - 普通内部错误详情可返回给客户端
-  - 5xx `ErrorHttp` 保留显式配置的消息和描述
-  - Recovery 始终返回 HTTP 500，panic 文本位于响应 `desc`
-  - 允许客户端通过 `x-log-level` 调整访问日志级别
-  - 不主动注入 TracerProvider
-  - HTTP Server 超时保持零值
+- 使用 v0.2.0 严格默认值:
+  - 请求体上限为 10 MiB
+  - 普通内部错误、5xx `ErrorHttp` 和 Recovery panic 不向客户端暴露详情
+  - 默认脱敏常见凭据类 Query 参数
+  - 忽略客户端 `x-log-level`，访问日志仅由服务端全局日志级别控制
+  - 不自动安装 OpenTelemetry SDK TracerProvider
+  - HTTP Server 超时为 `5s / 60s / 60s / 120s`（ReadHeader / Read / Write / Idle）
 
 ### NewServerWithOptions
 
 - 签名: `func NewServerWithOptions(serviceName, addr string, debug bool, options ...ServerOption) (*Server, error)`
-- 从兼容默认值开始，按传入顺序应用选项
+- 从 v0.2.0 严格默认值开始，按传入顺序应用选项
 - 后传入的同类选项覆盖前一个值；查询参数脱敏名称按集合累加
 
 ## ServerOption 索引
@@ -64,34 +63,43 @@
 
 - 签名: `func WithExposeErrorDetails(enabled bool) ServerOption`
 - false 时普通内部错误和所有 Recovery panic 返回通用 500；5xx `ErrorHttp` 保留有效状态码，但消息和描述替换为对应标准 HTTP 文本
-- 非 5xx 业务 `ErrorHttp` 始终保留业务状态码、消息和描述
+- 4xx 业务 `ErrorHttp` 始终保留业务状态码、消息和描述
 - Recovery 始终返回 HTTP 500，不把 panic 中的 `ErrorHttp` 转换为业务状态码
 - true 时 Recovery 沿用旧版字段结构，通用消息位于 `msg`，panic 文本位于 `desc`
 
 ### WithRedactQueryParameters
 
 - 签名: `func WithRedactQueryParameters(names ...string) ServerOption`
-- 启用后访问日志始终脱敏以下默认名称:
+- 默认配置已经脱敏以下名称，调用该选项会继续追加:
   - `token`
   - `access_token`
+  - `refresh_token`
+  - `id_token`
   - `authorization`
   - `api_key`
   - `password`
+  - `client_secret`
+  - `secret`
+  - `signature`
+  - `sig`
+  - `session`
+  - `session_id`
 - 调用方提供的名称会去除首尾空格、转换为小写并加入集合
 - 该选项只影响访问日志，不修改原始 `http.Request.URL`
 
-### WithAllowClientLogLevel
+### 客户端日志级别请求头
 
-- 签名: `func WithAllowClientLogLevel(enabled bool) ServerOption`
-- false 时忽略客户端 `x-log-level` 请求头
-- true 保留旧版本的客户端日志级别覆盖行为
+- v0.2.0 删除旧客户端日志级别覆盖选项
+- `x-log-level` 始终被忽略，客户端不能降低或禁用访问日志
+- 访问日志最终过滤只由服务端 `SetLogLevel` 配置控制
 
 ### WithTracerProvider
 
 - 签名: `func WithTracerProvider(provider trace.TracerProvider) ServerOption`
 - 将 Provider 注入 `otelgin.Middleware`
 - nil interface 和 typed-nil 指针都会在构造阶段被拒绝
-- 未配置时继续使用 OpenTelemetry 全局 Provider
+- 未配置时使用 OpenTelemetry 全局 Provider；easygin 不再自动安装 SDK Provider
+- 未显式配置 Provider 时日志仍正常写入标准错误，只是不包含有效 Trace/Span ID
 
 ### WithHTTPTimeouts
 
@@ -103,6 +111,8 @@
   - `IdleTimeout`
 - 任一参数为负数时构造失败；零值沿用 Go HTTP Server 的无限制语义
 - 校验使用固定顺序，错误结果稳定
+- 默认值分别为 `5s`、`60s`、`60s`、`120s`
+- SSE、长轮询和大文件流式响应可能需要提高 `WriteTimeout`，或将 write 参数显式设为 `0`
 
 ## 生命周期函数
 

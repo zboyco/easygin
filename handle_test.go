@@ -249,6 +249,63 @@ func TestRenderAPIEscapesAttachmentFilename(t *testing.T) {
 	}
 }
 
+// TestRenderAPIWithStatusCodeContract 验证自定义响应状态码只接受 200-599，并安全处理 nil 指针。
+func TestRenderAPIWithStatusCodeContract(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name       string
+		target     string
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name:       "reject informational status",
+			target:     "/status?status=100",
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:       "reject status above supported range",
+			target:     "/status?status=600",
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:       "reject nil pointer",
+			target:     "/status?status=200&mode=nil",
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:       "accept status 200",
+			target:     "/status?status=200",
+			wantStatus: http.StatusOK,
+			wantBody:   "ok",
+		},
+		{
+			name:       "accept status 599 pointer",
+			target:     "/status?status=599&mode=pointer",
+			wantStatus: maxErrorHTTPStatus,
+			wantBody:   "custom",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodGet, tt.target, nil)
+
+			renderAPIWithPolicy(&testStatusCodeHandler{}, "test.status", false)(ctx)
+
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, tt.wantStatus, recorder.Body.String())
+			}
+			if tt.wantBody != "" && recorder.Body.String() != tt.wantBody {
+				t.Fatalf("body = %q, want %q", recorder.Body.String(), tt.wantBody)
+			}
+		})
+	}
+}
+
 func TestBindParamsInitializesEmbeddedPointerFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -721,6 +778,12 @@ type TestMultipartFilesHandler struct {
 
 type TestAttachmentHandler struct{}
 
+// testStatusCodeHandler 返回测试指定的输出，供 renderAPI 状态码契约测试使用。
+type testStatusCodeHandler struct {
+	Status int    `in:"query" name:"status"`
+	Mode   string `in:"query" name:"mode,omitempty"`
+}
+
 type TestMultipartFilesBody struct {
 	Single *multipart.FileHeader   `name:"file"`
 	Multi  []*multipart.FileHeader `name:"files"`
@@ -756,6 +819,19 @@ func (h *TestPresenceHandler) Output(ctx context.Context) (any, error) {
 
 func (h *TestEmptyIntQueryHandler) Output(ctx context.Context) (any, error) {
 	return nil, nil
+}
+
+// Output 返回预设的 WithStatusCode 测试值。
+func (h *testStatusCodeHandler) Output(context.Context) (any, error) {
+	switch h.Mode {
+	case "nil":
+		var output *WithStatusCode
+		return output, nil
+	case "pointer":
+		return &WithStatusCode{StatusCode: h.Status, Output: "custom"}, nil
+	default:
+		return WithStatusCode{StatusCode: h.Status, Output: "ok"}, nil
+	}
 }
 
 func (TestValueHandler) Output(ctx context.Context) (any, error) {

@@ -179,12 +179,8 @@ func (s *Server) Setup(groups ...*RouterGroup) error {
 
 	// 添加404处理
 	engine.NoRoute(func(c *gin.Context) {
-		resp := &gin.H{
-			"code": http.StatusNotFound,
-			"msg":  "404 page not found",
-			"desc": "404 page not found",
-		}
-		c.AbortWithStatusJSON(http.StatusNotFound, resp)
+		message := http.StatusText(http.StatusNotFound)
+		writeAPIError(c, http.StatusNotFound, message, message)
 	})
 
 	// 添加请求主路由到上下文中

@@ -3,7 +3,6 @@ package easygin
 import (
 	"context"
 	"net/http"
-	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -12,26 +11,9 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
 )
 
-func init() {
-	// 初始化全局 TracerProvider，使用 "easygin" 作为服务名称
-	// 这个 TracerProvider 会在整个应用程序中被共享
-	InitGlobalTracerProvider("easygin")
-}
-
-// InitGlobalTracerProvider 初始化W3C Trace Context标准的OpenTelemetry追踪
-// 该方法配置全局的 TracerProvider，设置资源属性、采样策略和导出器
-// 其中StdoutSpanExporter 用于将追踪数据输出到控制台
-// 可以根据需要添加自定义的导出器，如Jaeger或Zipkin
-// 也可以不使用该方法，自定义创建全局追踪器
-func InitGlobalTracerProvider(serviceName string, customExporters ...sdktrace.SpanExporter) {
-	// 尝试关闭现有的 TracerProvider 以释放资源
-	// 使用安全的类型断言
-	if currentProvider := otel.GetTracerProvider(); currentProvider != nil {
-		if provider, ok := currentProvider.(*sdktrace.TracerProvider); ok {
-			_ = provider.Shutdown(context.Background())
-		}
-	}
-
+// InitGlobalTracerProvider 使用显式提供的 Exporter 初始化全局 OpenTelemetry Provider。
+// 返回的 Provider 由调用方负责 Flush 和 Shutdown；nil Exporter 会被忽略，已有 Provider 不会被关闭。
+func InitGlobalTracerProvider(serviceName string, exporters ...sdktrace.SpanExporter) *sdktrace.TracerProvider {
 	// 设置全局传播器为W3C Trace Context标准
 	// 这确保了追踪上下文可以在不同服务之间正确传递
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
@@ -49,26 +31,23 @@ func InitGlobalTracerProvider(serviceName string, customExporters ...sdktrace.Sp
 			semconv.TelemetrySDKVersionKey.String(otel.Version()), // SDK 版本
 			semconv.TelemetrySDKNameKey.String("opentelemetry"),   // SDK 名称
 		)),
-		// 设置采样策略，决定哪些 span 会被记录
+		// 设置采样策略，决定哪些 span 会被记录。
 		sdktrace.WithSampler(sdktrace.ParentBased(
-			sdktrace.AlwaysSample(), // 如果没有父 span，则总是采样
+			sdktrace.AlwaysSample(),
 		)),
-		// 配置标准输出导出器，使用批处理模式
-		sdktrace.WithBatcher(StdoutSpanExporter(),
-			sdktrace.WithBatchTimeout(100*time.Millisecond), // 设置较短的批处理超时，提高实时性
-		),
 	}
 
-	// 添加用户自定义的 Exporter 选项
-	// 这允许将追踪数据同时发送到多个后端系统
-	for _, exporter := range customExporters {
+	for _, exporter := range exporters {
+		if isNilInterfaceValue(exporter) {
+			continue
+		}
 		opts = append(opts, sdktrace.WithBatcher(exporter))
 	}
 
 	// 创建 TracerProvider 并设置为全局默认值
 	tp := sdktrace.NewTracerProvider(opts...)
-	// 设置全局 TracerProvider，使其对整个应用程序可用
 	otel.SetTracerProvider(tp)
+	return tp
 }
 
 // InjectTraceParent 注入 trace parent 到 header 中

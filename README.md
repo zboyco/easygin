@@ -339,9 +339,6 @@ import (
 func main() {
     serviceName := "srv-example"
 
-    // 初始化全局跟踪器，指定服务名称，用于链路追踪和日志记录
-    easygin.InitGlobalTracerProvider(serviceName)
-
     // 设置日志等级为DebugLevel
     easygin.SetLogLevel(easygin.DebugLevel)
 
@@ -354,14 +351,35 @@ func main() {
     }
 }
 ```
-> easygin 内部使用了 OpenTelemetry 进行链路追踪和日志记录，默认会初始化服务名为"easygin"的全局跟踪器。  
-> 如果需要自定义服务名称，可以使用 `easygin.InitGlobalTracerProvider` 方法进行初始化。  
-> `easygin.StdoutSpanExporter()` 方法用于创建一个标准输出的SpanExporter，用于将追踪信息输出到控制台。
-> 如果不使用`easygin.InitGlobalTracerProvider`，可以自定义全局跟踪器的配置，例如指定Trace标准、采样率、采样策略等。
+
+日志与 OpenTelemetry 配置相互独立。未显式安装 SDK Provider 时，访问日志和 `logr.FromContext` 获取的业务日志仍会以 zerolog JSON 写入标准错误，只是不包含 `traceID`、`spanID`，也不会导出 Trace。
+
+需要 Trace 时，由应用显式创建 Exporter 并管理 Provider 生命周期：
+
+```go
+// exporter 由应用按实际后端创建，例如 OTLP Exporter。
+provider := easygin.InitGlobalTracerProvider(serviceName, exporter)
+defer func() {
+    _ = provider.Shutdown(context.Background())
+}()
+```
+
+`InitGlobalTracerProvider` 只安装显式传入的有效 Exporter，nil 和 typed-nil Exporter 会被忽略；它不再附加标准输出 Exporter，也不会关闭此前安装的 Provider。调用方负责在退出前调用 `ForceFlush` 或 `Shutdown`。已经自行配置 OpenTelemetry SDK 的应用无需调用该辅助函数，可以通过 `WithTracerProvider` 为单个 Server 指定 Provider。
 
 ### 服务器安全配置与生命周期
 
-需要在生产环境收紧请求体、错误响应和访问日志时，可以使用 `NewServerWithOptions`：
+从 v0.2.0 开始，`NewServer` 和 `NewServerWithOptions` 使用相同的严格默认值：
+
+| 配置 | 默认值 |
+| --- | --- |
+| 请求体上限 | 10 MiB |
+| 普通错误、5xx 和 panic 详情 | 不返回给客户端 |
+| 访问日志 Query 脱敏 | 默认启用 |
+| 客户端访问日志级别覆盖 | 不支持，忽略 `x-log-level` |
+| HTTP 超时 | `5s / 60s / 60s / 120s`（ReadHeader / Read / Write / Idle） |
+| OpenTelemetry SDK Provider | 不自动安装 |
+
+需要按部署场景调整默认值时，使用 `NewServerWithOptions`：
 
 ```go
 package main
@@ -377,25 +395,24 @@ func newProductionServer(serviceName string) (*easygin.Server, error) {
         serviceName,
         ":8080",
         false,
-        // 限制 JSON 和 Multipart 请求体；超限请求返回 HTTP 413。
-        easygin.WithMaxBodyBytes(10*1024*1024),
-        // 普通错误和 5xx easygin.Error 隐藏详情；5xx 状态码及非 5xx 业务响应保持不变。
-        easygin.WithExposeErrorDetails(false),
-        // 无参数时默认移除 token、access_token、authorization、api_key、password。
-        // 也可以传入额外的参数名，例如 WithRedactQueryParameters("signature")。
-        easygin.WithRedactQueryParameters(),
-        // 不允许客户端使用 x-log-level 请求头改变访问日志级别。
-        easygin.WithAllowClientLogLevel(false),
+        // 将默认 10 MiB 请求体上限调整为 20 MiB。
+        easygin.WithMaxBodyBytes(20*1024*1024),
+        // 在默认敏感参数集合上追加业务字段。
+        easygin.WithRedactQueryParameters("tenant_secret"),
         // 可选：为 Gin OpenTelemetry 中间件注入指定 Provider。
         // easygin.WithTracerProvider(provider),
-        easygin.WithHTTPTimeouts(5*time.Second, 15*time.Second, 30*time.Second, 60*time.Second),
+        easygin.WithHTTPTimeouts(5*time.Second, 60*time.Second, 60*time.Second, 120*time.Second),
     )
 }
 ```
 
-`WithMaxBodyBytes` 同时限制 JSON 和 Multipart 请求。请求在绑定阶段超过限制时返回 `413 Request Entity Too Large`，不会继续执行 API；Multipart 解析产生的临时文件会在请求处理链结束后自动清理。`WithExposeErrorDetails(false)` 会隐藏普通错误、所有 5xx `easygin.Error` 和 panic 文本；有效的 5xx 状态码会保留，响应内容改为对应的标准 HTTP 文本。非 5xx `easygin.Error` 仍按业务状态码、消息和描述输出。
+`WithMaxBodyBytes` 同时限制 JSON 和 Multipart 请求。请求在绑定阶段超过限制时返回 `413 Request Entity Too Large`，不会继续执行 API；Multipart 解析产生的临时文件会在请求处理链结束后自动清理。传入 `WithMaxBodyBytes(0)` 可以显式关闭 Body 上限。
 
-`WithRedactQueryParameters` 只影响访问日志，不会修改 `http.Request.URL`。调用时不传参数会启用常见敏感字段默认列表；传入参数时会在该列表基础上加入自定义字段。日志级别覆盖默认允许 `x-log-level` 请求头，生产环境建议通过 `WithAllowClientLogLevel(false)` 关闭。
+默认错误策略会隐藏普通错误、所有 5xx `ErrorHttp` 和 panic 文本；有效的 5xx 状态码会保留，响应内容改为对应的标准 HTTP 文本。4xx `ErrorHttp` 仍按业务状态码、消息和描述输出。只有明确接受泄露风险时才使用 `WithExposeErrorDetails(true)` 恢复详情。
+
+`WithRedactQueryParameters` 只影响访问日志，不修改 `http.Request.URL`，并且只会向默认集合追加字段。默认集合包含 `token`、`access_token`、`refresh_token`、`id_token`、`authorization`、`api_key`、`password`、`client_secret`、`secret`、`signature`、`sig`、`session` 和 `session_id`。脱敏按原始 Query 字段执行，敏感值包含未转义分号等畸形内容时也不会回退输出原始 URI。访问日志是否输出只由服务端 `SetLogLevel` 控制，客户端传入 `x-log-level` 不会生效。
+
+默认 `WriteTimeout` 为 60 秒。SSE、长轮询、大文件下载等可能持续写响应的接口，应按最长响应时间提高该值，或通过 `WithHTTPTimeouts` 将 `write` 参数设为 `0`；同时仍建议在业务上下文中设置取消和超时边界。
 
 如果需要自行管理监听器、测试服务或实现优雅关闭，可以拆开 `Setup`、`Serve` 和 `Shutdown`：
 
@@ -446,7 +463,24 @@ func runManagedServer() error {
 
 `Setup` 只完成路由和 HTTP Server 准备，不会开始监听或输出“Listening and serving”消息。`Serve(nil)` 使用构造时配置的地址；传入外部 Listener 时，启动日志记录 `listener.Addr()` 返回的真实地址。
 
-`NewServer` 保留旧版本兼容默认值：不限制请求体大小、允许返回普通错误和 5xx `ErrorHttp` 详情、允许客户端日志级别覆盖、不主动注入追踪 Provider，HTTP 超时保持零值。Recovery 始终返回 HTTP 500；兼容模式下 `msg` 保持 `Internal Server Error`，panic 文本位于 `desc`。已有项目无需修改即可继续使用；新项目建议按部署环境显式选择上述安全选项。
+`NewServer` 是无需额外选项的便捷入口，使用上述 v0.2.0 严格默认值；`NewServerWithOptions` 在同一组默认值上应用显式覆盖。Recovery 始终返回 HTTP 500，默认不会把 panic 文本写入响应。
+
+### 从 v0.1.x 迁移到 v0.2.0
+
+v0.2.0 是安全默认值和 API 契约的断代版本，升级时需要检查以下变化：
+
+| 变化 | v0.2.0 行为 | 必要的迁移动作 |
+| --- | --- | --- |
+| Body 限制 | 默认 10 MiB，超限返回 413 | 大请求提高 `WithMaxBodyBytes`；确需无限制时显式传 `0` |
+| 错误详情 | 默认隐藏普通错误、5xx 和 panic 详情 | 客户端不要依赖内部错误文本；仅在受控环境使用 `WithExposeErrorDetails(true)` |
+| 访问日志 Query | 默认脱敏常见凭据字段 | 自定义敏感字段通过 `WithRedactQueryParameters` 追加 |
+| 日志级别请求头 | `x-log-level` 始终忽略，旧客户端覆盖选项已删除 | 改由服务端 `SetLogLevel` 或部署配置控制 |
+| HTTP 超时 | 默认 `5s / 60s / 60s / 120s` | 检查上传、SSE、长轮询和大文件下载；必要时覆盖对应超时 |
+| OpenTelemetry | 不再包级自动初始化，不再提供内置标准输出 Exporter | 应用显式安装 Exporter/Provider，并负责 Flush/Shutdown；无需 Trace 时不必配置 |
+| `ErrorHttp` | 只接受 400-599，支持包装错误，typed nil 和非法状态降级为 500 | 修正使用 2xx、3xx 或 600 以上状态码的自定义错误 |
+| `WithStatusCode` | 只接受 200-599，nil 指针和非法状态降级为 500 | 修正 1xx、600 以上和 nil 包装响应 |
+
+所有框架错误响应固定使用 `{"code": number, "msg": string, "desc": string}`。404、参数绑定错误、Recovery 和非法状态码都遵守该结构；业务 4xx `ErrorHttp` 仍保留其消息和描述。
 
 Gin 的运行模式是进程级全局状态，并不属于单个 `gin.Engine`。easygin 在包初始化阶段设置兼容的 ReleaseMode 默认值，之后 `NewServer`、`Setup` 和请求处理过程都不会再调用 `gin.SetMode`；应用可以在自身初始化阶段显式选择 DebugMode、ReleaseMode 或 TestMode，创建 Server 不会覆盖该选择。应用仍应避免在服务运行期间并发调用 `gin.SetMode`；`debug` 参数只控制 easygin 的 pprof 注册和自身调试输出。
 
