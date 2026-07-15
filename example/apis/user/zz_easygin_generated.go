@@ -782,4 +782,3 @@ func (r *ListUser) EasyGinBindParameters(c *gin.Context) error {
 	}
 	return nil
 }
-

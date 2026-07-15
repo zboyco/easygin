@@ -26,21 +26,17 @@ func Ptr[T any](v T) *T {
 	return &v
 }
 
-// 添加一个全局变量，用于记录已处理的类型
-var processedTypes map[string]bool
-
+// GenerateOpenAPI 根据路由定义生成并校验 OpenAPI 文档。
 func GenerateOpenAPI(groups ...*RouterGroup) error {
 	fmt.Println("Generating file for OpenAPI specification...")
-
-	// 初始化正在处理的类型映射
-	processedTypes = make(map[string]bool)
 
 	// 创建 OpenAPI 规范文档
 	paths := openapi3.Paths{}
 	doc := &openapi3.T{
 		OpenAPI: "3.0.3",
 		Info: &openapi3.Info{
-			Title: "RESTful API",
+			Title:   "RESTful API",
+			Version: "1.0.0",
 		},
 		Paths: &paths,
 		Components: &openapi3.Components{
@@ -54,6 +50,9 @@ func GenerateOpenAPI(groups ...*RouterGroup) error {
 			return err
 		}
 	}
+	if err := doc.Validate(context.Background()); err != nil {
+		return fmt.Errorf("validate OpenAPI document: %w", err)
+	}
 
 	// 将文档保存为 JSON 文件
 	docBytes, err := json.MarshalIndent(doc, "", "  ")
@@ -61,7 +60,7 @@ func GenerateOpenAPI(groups ...*RouterGroup) error {
 		return err
 	}
 
-	if err = os.WriteFile("openapi.json", docBytes, 0o644); err != nil {
+	if err = writeFileAtomic("openapi.json", docBytes, 0o644); err != nil {
 		return err
 	}
 
@@ -85,9 +84,10 @@ func snakeToPascalCase(s string) string {
 	return pascalCase
 }
 
-func generateSchema(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3.Schema {
+// generateSchema 返回类型对应的内联 Schema 或组件引用。
+func generateSchema(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3.SchemaRef {
 	if t == nil {
-		return openapi3.NewObjectSchema()
+		return &openapi3.SchemaRef{Value: openapi3.NewObjectSchema()}
 	}
 
 	if t.Kind() == reflect.Ptr {
@@ -98,19 +98,19 @@ func generateSchema(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3
 	if isFileHeaderTypeOrAlias(t) {
 		schema := openapi3.NewStringSchema()
 		schema.Format = "binary"
-		return schema
+		return &openapi3.SchemaRef{Value: schema}
 	}
 
 	// 特殊处理实现 TextUnmarshaler 的类型
 	if isTextUnmarshalerType(t) {
-		return openapi3.NewStringSchema()
+		return &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}
 	}
 
 	// 特殊处理time.Time及其衍生类型
 	if isTimeTypeOrAlias(t) {
 		schema := openapi3.NewStringSchema()
 		schema.Format = "date-time"
-		return schema
+		return &openapi3.SchemaRef{Value: schema}
 	}
 
 	// 检查是否已经在components/schemas中定义过该类型
@@ -118,40 +118,51 @@ func generateSchema(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3
 		// 将包路径和类型名转换为有效的组件名
 		schemaName := snakeToPascalCase(t.PkgPath() + "." + t.Name())
 
-		// 检查是否已经在处理这个类型，避免无限递归
-		if processedTypes[schemaName] {
-			// 如果正在处理或已处理过，直接返回引用
-			return &openapi3.Schema{
-				// 不使用 AllOf，而是直接使用 $ref 字段
-				Extensions: map[string]any{
-					"$ref": "#/components/schemas/" + schemaName,
-				},
-			}
+		// 组件占位既可复用已生成 Schema，也可以打断递归类型展开。
+		if _, exists := doc.Components.Schemas[schemaName]; exists {
+			return componentSchemaRef(doc, schemaName)
 		}
 
-		if _, exists := doc.Components.Schemas[schemaName]; !exists {
-			// 标记该类型正在处理中
-			processedTypes[schemaName] = true
-
-			// 将类型定义添加到components/schemas
-			schemaValue := generateSchemaValue(doc, t, isMultipart)
-
-			if schemaValue != nil {
-				doc.Components.Schemas[schemaName] = &openapi3.SchemaRef{
-					Value: schemaValue,
-				}
-			}
+		placeholder := openapi3.NewObjectSchema()
+		doc.Components.Schemas[schemaName] = &openapi3.SchemaRef{
+			Value: placeholder,
 		}
-		// 返回对该类型的引用
-		return &openapi3.Schema{
-			// 不使用 AllOf，而是直接使用 $ref 字段
-			Extensions: map[string]any{
-				"$ref": "#/components/schemas/" + schemaName,
-			},
+		schemaValue := generateSchemaValue(doc, t, isMultipart)
+		if schemaValue != nil {
+			*placeholder = *schemaValue
 		}
+		return componentSchemaRef(doc, schemaName)
 	}
 
-	return generateSchemaValue(doc, t, isMultipart)
+	return &openapi3.SchemaRef{Value: generateSchemaValue(doc, t, isMultipart)}
+}
+
+// componentSchemaRef 创建同时包含引用地址和已解析值的组件引用。
+func componentSchemaRef(doc *openapi3.T, schemaName string) *openapi3.SchemaRef {
+	component := doc.Components.Schemas[schemaName]
+	return &openapi3.SchemaRef{
+		Ref:   "#/components/schemas/" + schemaName,
+		Value: component.Value,
+	}
+}
+
+// schemaRefWithDescription 为字段 Schema 增加描述，引用类型通过 allOf 保持 OpenAPI 3.0 合法性。
+func schemaRefWithDescription(ref *openapi3.SchemaRef, description string) *openapi3.SchemaRef {
+	if description == "" || ref == nil {
+		return ref
+	}
+	if ref.Ref != "" {
+		return &openapi3.SchemaRef{Value: &openapi3.Schema{
+			AllOf:       openapi3.SchemaRefs{ref},
+			Description: description,
+		}}
+	}
+	if ref.Value != nil {
+		clone := *ref.Value
+		clone.Description = description
+		return &openapi3.SchemaRef{Value: &clone}
+	}
+	return ref
 }
 
 // generateOperationID 将API结构体名称转换为operationId格式（首字母小写的驼峰命名）
@@ -170,6 +181,10 @@ func generateOperationID(apiType reflect.Type) string {
 }
 
 func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, parentMiddlewareParams ...*openapi3.ParameterRef) error {
+	if group == nil {
+		return fmt.Errorf("router group is nil")
+	}
+
 	// 处理当前组的路径前缀
 	basePath := joinURLPath(parentPath, group.path)
 
@@ -182,12 +197,9 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, 
 
 	// 处理当前组的中间件参数
 	for _, middleware := range group.middlewares {
-		middlewareType := reflect.TypeOf(middleware)
-		if middlewareType.Kind() == reflect.Ptr {
-			middlewareType = middlewareType.Elem()
-		}
-		if middlewareType.Kind() != reflect.Struct {
-			continue
+		middlewareType, err := routerHandlerStructType(middleware)
+		if err != nil {
+			return fmt.Errorf("invalid middleware in group %q: %w", basePath, err)
 		}
 
 		// 遍历中间件的字段
@@ -195,7 +207,7 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, 
 			field := middlewareType.Field(i)
 			inTag := field.Tag.Get("in")
 			if inTag == "body" {
-				panic("parameters in middleware cannot use `in:\"body\"` tag")
+				return fmt.Errorf("parameters in middleware %s cannot use `in:\"body\"` tag", middlewareType)
 			}
 			if inTag == "path" || inTag == "query" || inTag == "header" {
 				name := field.Tag.Get("name")
@@ -205,6 +217,9 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, 
 				if len(nameParts) > 1 && nameParts[1] == "omitempty" {
 					isRequired = false
 				}
+				if inTag == "path" {
+					isRequired = true
+				}
 
 				// 获取desc标签的值
 				desc := field.Tag.Get("desc")
@@ -212,7 +227,7 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, 
 				param := &openapi3.Parameter{
 					Name:        paramName,
 					In:          inTag,
-					Schema:      &openapi3.SchemaRef{Value: generateSchema(doc, field.Type, false)},
+					Schema:      generateSchema(doc, field.Type, false),
 					Required:    isRequired,
 					Description: desc, // 设置描述信息
 				}
@@ -223,6 +238,10 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, 
 
 	// 遍历组中的所有 API
 	for _, api := range group.apis {
+		apiType, err := routerHandlerStructType(api)
+		if err != nil {
+			return fmt.Errorf("invalid API in group %q: %w", basePath, err)
+		}
 		if _, ok := api.(NoOpenAPI); ok {
 			continue
 		}
@@ -267,9 +286,7 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, 
 					Description: Ptr("Default response"),
 					Content: openapi3.Content{
 						"application/json": &openapi3.MediaType{
-							Schema: &openapi3.SchemaRef{
-								Value: generateSchema(doc, reflect.TypeOf(&Error{}), false),
-							},
+							Schema: generateSchema(doc, reflect.TypeOf(&Error{}), false),
 						},
 					},
 				},
@@ -291,9 +308,7 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, 
 				if resp != nil {
 					responseRef.Value.Content = openapi3.Content{
 						"application/json": &openapi3.MediaType{
-							Schema: &openapi3.SchemaRef{
-								Value: generateSchema(doc, reflect.TypeOf(resp), false),
-							},
+							Schema: generateSchema(doc, reflect.TypeOf(resp), false),
 						},
 					}
 				}
@@ -311,38 +326,34 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, 
 			Tags:      []string{tagName}, // 添加标签，使用RouterGroup的完整路径
 		}
 
-		// 获取 API 类型信息
-		apiType := reflect.TypeOf(api).Elem()
-
 		// 生成并设置 operationId
 		op.OperationID = generateOperationID(apiType)
 
-		// 获取 HTTP 方法和摘要
+		// 从方法标记字段获取摘要；HTTP 方法以 RouterAPI 契约为准。
 		for i := 0; i < apiType.NumField(); i++ {
 			field := apiType.Field(i)
 			if strings.HasPrefix(field.Type.Name(), "Method") {
 				op.Summary = field.Tag.Get("summary")
-				method := strings.ToLower(strings.TrimPrefix(field.Type.Name(), "Method"))
-
-				// 确保路径存在
-				pathItem := doc.Paths.Value(apiPath)
-				if pathItem == nil {
-					pathItem = &openapi3.PathItem{}
-					doc.Paths.Set(apiPath, pathItem)
-				}
-
-				setPathItemOperation(pathItem, method, op)
-
-				// 添加中间件参数到操作中
-				if len(middlewareParams) > 0 {
-					op.Parameters = append(op.Parameters, middlewareParams...)
-				}
 				break
+			}
+		}
+		if len(middlewareParams) > 0 {
+			for _, parameter := range middlewareParams {
+				appendOperationParameter(op, parameter)
 			}
 		}
 
 		// 处理请求参数
 		processStructFields(doc, apiType, op, nil)
+
+		pathItem := doc.Paths.Value(apiPath)
+		if pathItem == nil {
+			pathItem = &openapi3.PathItem{}
+			doc.Paths.Set(apiPath, pathItem)
+		}
+		if err := setPathItemOperation(pathItem, strings.ToLower(api.Method()), op); err != nil {
+			return fmt.Errorf("generate OpenAPI operation for %s %s: %w", api.Method(), apiPath, err)
+		}
 	}
 
 	// 递归处理子组，传递当前组的中间件参数
@@ -356,7 +367,7 @@ func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, 
 }
 
 // setPathItemOperation 将 easygin 方法名映射到 OpenAPI PathItem。
-func setPathItemOperation(pathItem *openapi3.PathItem, method string, op *openapi3.Operation) {
+func setPathItemOperation(pathItem *openapi3.PathItem, method string, op *openapi3.Operation) error {
 	switch method {
 	case "get":
 		pathItem.Get = op
@@ -377,16 +388,28 @@ func setPathItemOperation(pathItem *openapi3.PathItem, method string, op *openap
 	case "trace":
 		pathItem.Trace = op
 	case "any":
-		pathItem.Get = op
-		pathItem.Post = op
-		pathItem.Put = op
-		pathItem.Delete = op
-		pathItem.Patch = op
-		pathItem.Head = op
-		pathItem.Options = op
-		pathItem.Connect = op
-		pathItem.Trace = op
+		pathItem.Get = cloneOperationForMethod(op, "get")
+		pathItem.Post = cloneOperationForMethod(op, "post")
+		pathItem.Put = cloneOperationForMethod(op, "put")
+		pathItem.Delete = cloneOperationForMethod(op, "delete")
+		pathItem.Patch = cloneOperationForMethod(op, "patch")
+		pathItem.Head = cloneOperationForMethod(op, "head")
+		pathItem.Options = cloneOperationForMethod(op, "options")
+		pathItem.Connect = cloneOperationForMethod(op, "connect")
+		pathItem.Trace = cloneOperationForMethod(op, "trace")
+	default:
+		return fmt.Errorf("unsupported HTTP method %q", method)
 	}
+	return nil
+}
+
+// cloneOperationForMethod 为 ANY 路由复制操作并生成方法级唯一 operationId。
+func cloneOperationForMethod(op *openapi3.Operation, method string) *openapi3.Operation {
+	clone := *op
+	if clone.OperationID != "" && method != "" {
+		clone.OperationID += strings.ToUpper(method[:1]) + method[1:]
+	}
+	return &clone
 }
 
 // 处理结构体字段，包括嵌入字段
@@ -401,6 +424,7 @@ func processStructFields(doc *openapi3.T, t reflect.Type, op *openapi3.Operation
 		return
 	}
 	processedTypes[t] = true
+	defer delete(processedTypes, t)
 
 	// 处理结构体字段
 	for i := 0; i < t.NumField(); i++ {
@@ -423,11 +447,10 @@ func processStructFields(doc *openapi3.T, t reflect.Type, op *openapi3.Operation
 					}
 					op.RequestBody = &openapi3.RequestBodyRef{
 						Value: &openapi3.RequestBody{
+							Required: true,
 							Content: openapi3.Content{
 								contentType: &openapi3.MediaType{
-									Schema: &openapi3.SchemaRef{
-										Value: generateSchema(doc, field.Type, isMultipart),
-									},
+									Schema: generateSchema(doc, field.Type, isMultipart),
 								},
 							},
 						},
@@ -441,15 +464,18 @@ func processStructFields(doc *openapi3.T, t reflect.Type, op *openapi3.Operation
 					if len(nameParts) > 1 && nameParts[1] == "omitempty" {
 						isRequired = false
 					}
+					if inTag == "path" {
+						isRequired = true
+					}
 					desc := field.Tag.Get("desc")
 					param := &openapi3.Parameter{
 						Name:        paramName,
 						In:          inTag,
-						Schema:      &openapi3.SchemaRef{Value: generateSchema(doc, field.Type, false)},
+						Schema:      generateSchema(doc, field.Type, false),
 						Required:    isRequired,
 						Description: desc,
 					}
-					op.Parameters = append(op.Parameters, &openapi3.ParameterRef{Value: param})
+					appendOperationParameter(op, &openapi3.ParameterRef{Value: param})
 				}
 			} else {
 				// 如果没有in标签，则递归处理嵌入字段
@@ -474,6 +500,9 @@ func processStructFields(doc *openapi3.T, t reflect.Type, op *openapi3.Operation
 			if len(nameParts) > 1 && nameParts[1] == "omitempty" {
 				isRequired = false
 			}
+			if inTag == "path" {
+				isRequired = true
+			}
 
 			// 处理 body 参数
 			if inTag == "body" {
@@ -486,11 +515,10 @@ func processStructFields(doc *openapi3.T, t reflect.Type, op *openapi3.Operation
 				}
 				op.RequestBody = &openapi3.RequestBodyRef{
 					Value: &openapi3.RequestBody{
+						Required: true,
 						Content: openapi3.Content{
 							contentType: &openapi3.MediaType{
-								Schema: &openapi3.SchemaRef{
-									Value: generateSchema(doc, field.Type, isMultipart),
-								},
+								Schema: generateSchema(doc, field.Type, isMultipart),
 							},
 						},
 					},
@@ -501,14 +529,36 @@ func processStructFields(doc *openapi3.T, t reflect.Type, op *openapi3.Operation
 				param := &openapi3.Parameter{
 					Name:        paramName,
 					In:          inTag,
-					Schema:      &openapi3.SchemaRef{Value: generateSchema(doc, field.Type, false)},
+					Schema:      generateSchema(doc, field.Type, false),
 					Required:    isRequired,
 					Description: desc,
 				}
-				op.Parameters = append(op.Parameters, &openapi3.ParameterRef{Value: param})
+				appendOperationParameter(op, &openapi3.ParameterRef{Value: param})
 			}
 		}
 	}
+}
+
+// appendOperationParameter 按 OpenAPI 的 (in, name) 唯一键追加参数。
+// 重复参数共享同一请求值，合并时保留更严格的必填约束和首个非空描述。
+func appendOperationParameter(op *openapi3.Operation, parameter *openapi3.ParameterRef) {
+	if parameter == nil || parameter.Value == nil {
+		return
+	}
+	for _, existing := range op.Parameters {
+		if existing == nil || existing.Value == nil {
+			continue
+		}
+		if existing.Value.In != parameter.Value.In || existing.Value.Name != parameter.Value.Name {
+			continue
+		}
+		existing.Value.Required = existing.Value.Required || parameter.Value.Required
+		if existing.Value.Description == "" {
+			existing.Value.Description = parameter.Value.Description
+		}
+		return
+	}
+	op.Parameters = append(op.Parameters, parameter)
 }
 
 // 将:param格式的路径参数转换为{param}格式
@@ -568,7 +618,7 @@ func isTextUnmarshalerType(t reflect.Type) bool {
 		return true
 	}
 
-	ptrType := reflect.PtrTo(t)
+	ptrType := reflect.PointerTo(t)
 	return ptrType.Implements(textUnmarshalerType)
 }
 
@@ -577,16 +627,26 @@ func isFileHeaderTypeOrAlias(t reflect.Type) bool {
 	return t.ConvertibleTo(timeType) && t.Kind() == timeType.Kind()
 }
 
-var doc *openapi3.T
-
+// generateSchemaValue 生成类型对应的内联 Schema。
 func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3.Schema {
+	return generateSchemaValueRecursive(doc, t, isMultipart, make(map[reflect.Type]bool))
+}
+
+// generateSchemaValueRecursive 递归展开 Schema，并避免匿名嵌入类型形成无限循环。
+func generateSchemaValueRecursive(doc *openapi3.T, t reflect.Type, isMultipart bool, visiting map[reflect.Type]bool) *openapi3.Schema {
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if visiting[t] {
+		return openapi3.NewObjectSchema()
+	}
+	visiting[t] = true
+	defer delete(visiting, t)
+
 	var schema *openapi3.Schema
 
 	// 获取基础类型，用于检测自嵌套
 	baseType := t
-	if baseType.Kind() == reflect.Ptr {
-		baseType = baseType.Elem()
-	}
 
 	switch t.Kind() {
 	case reflect.Struct:
@@ -597,7 +657,7 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 			field := t.Field(i)
 			// 处理嵌入字段
 			if field.Anonymous {
-				embeddedSchema := generateSchemaValue(doc, field.Type, isMultipart)
+				embeddedSchema := generateSchemaValueRecursive(doc, field.Type, isMultipart, visiting)
 				if embeddedSchema != nil && embeddedSchema.Properties != nil {
 					for name, propSchema := range embeddedSchema.Properties {
 						schema.Properties[name] = propSchema
@@ -612,7 +672,7 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 			// 处理普通字段
 			var name string
 			var desc string
-			var isRequired bool = true
+			var isRequired = true
 			var jsonType string
 
 			// 检查是否是multipart表单字段
@@ -638,9 +698,10 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 					// 检查是否包含omitempty和类型指定
 					if len(tagParts) > 1 {
 						for _, opt := range tagParts[1:] {
-							if opt == "omitempty" {
+							switch opt {
+							case "omitempty":
 								isRequired = false
-							} else if opt == "string" || opt == "number" || opt == "boolean" {
+							case "string", "number", "boolean":
 								// 保存JSON类型指定
 								jsonType = opt
 							}
@@ -664,18 +725,7 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 					// 对于自嵌套类型，使用引用
 					if baseType.PkgPath() != "" {
 						schemaName := snakeToPascalCase(baseType.PkgPath() + "." + baseType.Name())
-						// 修改：直接创建引用而不使用allOf
-						newSchema := openapi3.NewObjectSchema()
-						newSchema.Extensions = make(map[string]any)
-
-						// 添加一个title，帮助识别这是一个引用
-						newSchema.Title = schemaName
-
-						newSchema.Extensions["$ref"] = "#/components/schemas/" + schemaName
-
-						schemaRef = &openapi3.SchemaRef{
-							Value: newSchema,
-						}
+						schemaRef = componentSchemaRef(doc, schemaName)
 					} else {
 						// 如果没有包路径，创建一个简单的对象
 						newSchema := openapi3.NewObjectSchema()
@@ -691,32 +741,23 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 					// 对于非自嵌套类型，正常处理
 					// 如果有JSON类型指定，则使用指定的类型
 					if jsonType != "" {
-						var typeSchema *openapi3.Schema
 						switch jsonType {
 						case "string":
-							typeSchema = openapi3.NewStringSchema()
+							schemaRef = &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}
 						case "number":
-							typeSchema = openapi3.NewFloat64Schema()
+							schemaRef = &openapi3.SchemaRef{Value: openapi3.NewFloat64Schema()}
 						case "boolean":
-							typeSchema = openapi3.NewBoolSchema()
+							schemaRef = &openapi3.SchemaRef{Value: openapi3.NewBoolSchema()}
 						default:
-							// 默认使用常规处理
-							typeSchema = generateSchema(doc, field.Type, isMultipart)
-						}
-						schemaRef = &openapi3.SchemaRef{
-							Value: typeSchema,
+							schemaRef = generateSchema(doc, field.Type, isMultipart)
 						}
 					} else {
-						schemaRef = &openapi3.SchemaRef{
-							Value: generateSchema(doc, field.Type, isMultipart),
-						}
+						schemaRef = generateSchema(doc, field.Type, isMultipart)
 					}
 				}
 
 				// 添加字段描述
-				if desc != "" && schemaRef.Value != nil {
-					schemaRef.Value.Description = desc
-				}
+				schemaRef = schemaRefWithDescription(schemaRef, desc)
 				schema.Properties[name] = schemaRef
 				// 如果字段是必需的，添加到Required列表
 				if isRequired {
@@ -737,20 +778,14 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 		if elemType.Kind() == reflect.Struct && elemType.PkgPath() != "" {
 			schemaName := snakeToPascalCase(elemType.PkgPath() + "." + elemType.Name())
 
-			// 如果正在处理这个类型，直接使用引用避免无限递归
-			if processedTypes[schemaName] {
-				schema.Items = &openapi3.SchemaRef{
-					Ref: "#/components/schemas/" + schemaName,
-				}
+			// 组件存在时直接使用引用，避免递归展开。
+			if _, exists := doc.Components.Schemas[schemaName]; exists {
+				schema.Items = componentSchemaRef(doc, schemaName)
 			} else {
-				schema.Items = &openapi3.SchemaRef{
-					Value: generateSchema(doc, elemType, isMultipart),
-				}
+				schema.Items = generateSchema(doc, elemType, isMultipart)
 			}
 		} else {
-			schema.Items = &openapi3.SchemaRef{
-				Value: generateSchema(doc, elemType, isMultipart),
-			}
+			schema.Items = generateSchema(doc, elemType, isMultipart)
 		}
 	case reflect.String:
 		schema = openapi3.NewStringSchema()
@@ -770,9 +805,7 @@ func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *ope
 		}
 		// 使用 additionalProperties 表示 Map 的值类型
 		schema.AdditionalProperties = openapi3.AdditionalProperties{
-			Schema: &openapi3.SchemaRef{
-				Value: generateSchema(doc, t.Elem(), isMultipart),
-			},
+			Schema: generateSchema(doc, t.Elem(), isMultipart),
 		}
 	case reflect.Interface:
 		// 处理接口类型

@@ -152,6 +152,9 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, resp)
 	}))
 
+	// 在整条请求处理链结束后清理 multipart 临时文件。
+	s.engine.Use(multipartFormCleanup())
+
 	// 注册自定义的中间件
 	if len(s.customMiddleware) > 0 {
 		s.engine.Use(s.customMiddleware...)
@@ -166,7 +169,9 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 
 	// 注册所有路由组
 	for _, group := range groups {
-		handleGroup(s.handlerMap, &s.engine.RouterGroup, group)
+		if err := handleGroup(s.handlerMap, &s.engine.RouterGroup, group); err != nil {
+			return err
+		}
 	}
 
 	// 打印JSON请求体验证和默认值设置的状态提示
@@ -202,7 +207,11 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 //   - e: 父路由组
 //   - group: 要处理的路由组
 //   - parentMiddlewareNames: 父路由组的中间件名称列表
-func handleGroup(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *RouterGroup, parentMiddlewareNames ...string) {
+func handleGroup(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *RouterGroup, parentMiddlewareNames ...string) error {
+	if group == nil {
+		return fmt.Errorf("router group is nil")
+	}
+
 	// 创建当前路由组
 	g := e.Group(group.path)
 	basePath := g.BasePath()
@@ -215,7 +224,10 @@ func handleGroup(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *Rou
 	// 注册中间件
 	for _, handler := range group.middlewares {
 		// 获取处理器名称
-		handlerName := getHandlerName(handler)
+		handlerName, err := getHandlerName(handler)
+		if err != nil {
+			return fmt.Errorf("invalid middleware in group %q: %w", basePath, err)
+		}
 		middlewareNames = append(middlewareNames, handlerName)
 
 		if ginHandler, ok := handler.(GinHandler); ok {
@@ -232,7 +244,10 @@ func handleGroup(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *Rou
 	for i := range group.apis {
 		handler := group.apis[i]
 		// 获取处理器名称
-		handlerName := getHandlerName(handler)
+		handlerName, err := getHandlerName(handler)
+		if err != nil {
+			return fmt.Errorf("invalid API in group %q: %w", basePath, err)
+		}
 
 		// 获取路由路径，处理可能的双斜杠问题
 		path := handler.Path()
@@ -250,7 +265,10 @@ func handleGroup(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *Rou
 		// 获取HTTP方法
 		method := handler.Method()
 		// 获取API描述
-		description := getHandlerDescription(handler)
+		description, err := getHandlerDescription(handler)
+		if err != nil {
+			return fmt.Errorf("read API description for %s: %w", handlerName, err)
+		}
 
 		// 打印路由信息
 		if description != "" {
@@ -262,7 +280,7 @@ func handleGroup(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *Rou
 		// 收集路由信息
 		key := fmt.Sprintf("%s %s", method, routePath)
 		if _, ok := handlerMap[key]; ok {
-			panic(fmt.Sprintf("duplicate route %s %s", method, routePath))
+			return fmt.Errorf("duplicate route %s %s", method, routePath)
 		}
 		handlerMap[key] = handler
 
@@ -296,8 +314,12 @@ func handleGroup(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *Rou
 
 	// 递归处理子路由组，传递当前路由组的中间件名称
 	for _, sub := range group.children {
-		handleGroup(handlerMap, g, sub, middlewareNames...)
+		if err := handleGroup(handlerMap, g, sub, middlewareNames...); err != nil {
+			return err
+		}
 	}
+
+	return nil
 }
 
 // routeFromHandlerMap 按请求方法查找路由，未命中时回退到 ANY 路由。
@@ -319,23 +341,22 @@ func getShortMethod(method string) string {
 }
 
 // getHandlerName 获取处理器的名称
-func getHandlerName(handler RouterHandler) string {
-	// 使用反射获取
-	t := reflect.TypeOf(handler)
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
+func getHandlerName(handler RouterHandler) (string, error) {
+	t, err := routerHandlerStructType(handler)
+	if err != nil {
+		return "", err
 	}
 
 	// 返回包名.结构体名
-	return fmt.Sprintf("%s.%s", t.PkgPath()[strings.LastIndex(t.PkgPath(), "/")+1:], t.Name())
+	return fmt.Sprintf("%s.%s", t.PkgPath()[strings.LastIndex(t.PkgPath(), "/")+1:], t.Name()), nil
 }
 
 // getHandlerDescription 获取处理器的描述信息
-func getHandlerDescription(handler RouterHandler) string {
+func getHandlerDescription(handler RouterHandler) (string, error) {
 	// 尝试从结构体标签中获取summary
-	t := reflect.TypeOf(handler)
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
+	t, err := routerHandlerStructType(handler)
+	if err != nil {
+		return "", err
 	}
 
 	if t.Kind() == reflect.Struct {
@@ -357,12 +378,12 @@ func getHandlerDescription(handler RouterHandler) string {
 
 			// 检查字段是否有summary标签
 			if summary, ok := field.Tag.Lookup("summary"); ok {
-				return summary
+				return summary, nil
 			}
 		}
 	}
 
-	return ""
+	return "", nil
 }
 
 // WithGinMiddleware 添加全局Gin中间件

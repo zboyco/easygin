@@ -71,10 +71,7 @@ func handleEmptyValue(structPath string, field reflect.StructField, tagKey strin
 	}
 
 	// 检查标签选项
-	hasOmitempty := false
-	if slices.Contains(tagParts[1:], "omitempty") {
-		hasOmitempty = true
-	}
+	hasOmitempty := slices.Contains(tagParts[1:], "omitempty")
 
 	// 如果没有omitempty标签，则为必填字段
 	if !hasOmitempty {

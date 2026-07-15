@@ -10,6 +10,11 @@ import (
 )
 
 func (r *ListSub) EasyGinBindParameters(c *gin.Context) error {
+	// 初始化匿名嵌入字段 ListSubQuery
+	if r.ListSubQuery == nil {
+		r.ListSubQuery = new(ListSubQuery)
+	}
+
 	// 绑定查询参数 size
 	{
 		queryVal, queryOK := c.GetQuery("size")
@@ -22,7 +27,7 @@ func (r *ListSub) EasyGinBindParameters(c *gin.Context) error {
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'size': %v", err.Error())
 			}
-			r.Size = int(intVal)
+			r.ListSubQuery.Size = int(intVal)
 		}
 	}
 	// 绑定查询参数 offset
@@ -37,9 +42,8 @@ func (r *ListSub) EasyGinBindParameters(c *gin.Context) error {
 			if err != nil {
 				return fmt.Errorf("invalid parameter 'offset': %v", err.Error())
 			}
-			r.Offset = int(intVal)
+			r.ListSubQuery.Offset = int(intVal)
 		}
 	}
 	return nil
 }
-

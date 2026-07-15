@@ -3,9 +3,11 @@ package easygin
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -260,14 +262,17 @@ func TestBindParamsInitializesEmbeddedPointerFields(t *testing.T) {
 			t.Fatalf("expected body value 'bar', got %+v", bound.Body)
 		}
 
-		if bound.TestLevelOne == nil ||
-			bound.TestLevelOne.TestLevelTwo == nil ||
-			bound.TestLevelOne.TestLevelTwo.TestQueryLayer == nil {
+		levelOne := bound.TestLevelOne
+		if levelOne == nil {
 			t.Fatalf("embedded pointer chain was not initialized: %+v", bound)
 		}
-
-		if bound.TestLevelOne.TestLevelTwo.TestQueryLayer.Query != "foo" {
-			t.Fatalf("expected query parameter to be 'foo', got %q", bound.TestLevelOne.TestLevelTwo.TestQueryLayer.Query)
+		levelTwo := levelOne.TestLevelTwo
+		if levelTwo == nil || levelTwo.TestQueryLayer == nil {
+			t.Fatalf("embedded pointer chain was not initialized: %+v", bound)
+		}
+		queryLayer := levelTwo.TestQueryLayer
+		if queryLayer.Query != "foo" {
+			t.Fatalf("expected query parameter to be 'foo', got %q", queryLayer.Query)
 		}
 	})
 
@@ -294,21 +299,22 @@ func TestBindParamsInitializesEmbeddedPointerFields(t *testing.T) {
 			ctx.Params = gin.Params{{Key: "id", Value: "77"}}
 		}).(*TestPathHeaderHandler)
 
-		if bound.TestPathLayer == nil ||
-			bound.TestPathLayer.TestOptionalLayer == nil {
+		pathLayer := bound.TestPathLayer
+		if pathLayer == nil || pathLayer.TestOptionalLayer == nil {
 			t.Fatalf("expected embedded pointer chain to be initialized: %+v", bound)
 		}
+		optionalLayer := pathLayer.TestOptionalLayer
 
-		if bound.TestPathLayer.PathValue != 77 {
-			t.Fatalf("expected path parameter 77, got %d", bound.TestPathLayer.PathValue)
+		if pathLayer.PathValue != 77 {
+			t.Fatalf("expected path parameter 77, got %d", pathLayer.PathValue)
 		}
 
-		if bound.TestPathLayer.TestOptionalLayer.QueryWithDefault != "fallback" {
-			t.Fatalf("expected default query value 'fallback', got %q", bound.TestPathLayer.TestOptionalLayer.QueryWithDefault)
+		if optionalLayer.QueryWithDefault != "fallback" {
+			t.Fatalf("expected default query value 'fallback', got %q", optionalLayer.QueryWithDefault)
 		}
 
-		if bound.TestPathLayer.TestOptionalLayer.HeaderWithDefault != "trace" {
-			t.Fatalf("expected default header value 'trace', got %q", bound.TestPathLayer.TestOptionalLayer.HeaderWithDefault)
+		if optionalLayer.HeaderWithDefault != "trace" {
+			t.Fatalf("expected default header value 'trace', got %q", optionalLayer.HeaderWithDefault)
 		}
 	})
 
@@ -328,13 +334,14 @@ func TestBindParamsInitializesEmbeddedPointerFields(t *testing.T) {
 			t.Fatalf("expected optional field default 'opt', got %+v", bound.Body)
 		}
 
-		if bound.TestBodyDefaultEmbedding == nil ||
-			bound.TestBodyDefaultEmbedding.TestBodyDefaultHeader == nil {
+		bodyEmbedding := bound.TestBodyDefaultEmbedding
+		if bodyEmbedding == nil || bodyEmbedding.TestBodyDefaultHeader == nil {
 			t.Fatalf("expected embedded header chain initialized: %+v", bound)
 		}
+		bodyHeader := bodyEmbedding.TestBodyDefaultHeader
 
-		if bound.TestBodyDefaultEmbedding.TestBodyDefaultHeader.Trace != "trace" {
-			t.Fatalf("expected default header trace value 'trace', got %q", bound.TestBodyDefaultEmbedding.TestBodyDefaultHeader.Trace)
+		if bodyHeader.Trace != "trace" {
+			t.Fatalf("expected default header trace value 'trace', got %q", bodyHeader.Trace)
 		}
 	})
 
@@ -422,13 +429,14 @@ func TestBindParamsInitializesEmbeddedPointerFields(t *testing.T) {
 			t.Fatalf("expected multipart body to be parsed, got %+v", bound.Body)
 		}
 
-		if bound.TestMultipartLevelOne == nil ||
-			bound.TestMultipartLevelOne.TestMultipartQuery == nil {
+		multipartLevel := bound.TestMultipartLevelOne
+		if multipartLevel == nil || multipartLevel.TestMultipartQuery == nil {
 			t.Fatalf("expected multipart handler embedded pointers initialized: %+v", bound)
 		}
+		multipartQuery := multipartLevel.TestMultipartQuery
 
-		if bound.TestMultipartLevelOne.TestMultipartQuery.Token != "t1" {
-			t.Fatalf("expected token 't1', got %q", bound.TestMultipartLevelOne.TestMultipartQuery.Token)
+		if multipartQuery.Token != "t1" {
+			t.Fatalf("expected token 't1', got %q", multipartQuery.Token)
 		}
 	})
 
@@ -478,6 +486,85 @@ func TestBindParamsInitializesEmbeddedPointerFields(t *testing.T) {
 			t.Fatalf("unexpected multi filenames: %q, %q", bound.Body.Multi[0].Filename, bound.Body.Multi[1].Filename)
 		}
 	})
+}
+
+// TestBindParamsAcceptsValueHandler 验证公开接口允许的结构体值可以正常绑定。
+func TestBindParamsAcceptsValueHandler(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/value?name=easygin", nil)
+	bound := bindHandlerForTest(t, TestValueHandler{}, req, nil)
+
+	handler, ok := bound.(*TestValueHandler)
+	if !ok {
+		t.Fatalf("bound handler type = %T, want *TestValueHandler", bound)
+	}
+	if handler.Name != "easygin" {
+		t.Fatalf("bound name = %q, want easygin", handler.Name)
+	}
+}
+
+// TestBindParamsRejectsTypedNilHandler 验证 typed nil 在反射绑定前返回明确错误。
+func TestBindParamsRejectsTypedNilHandler(t *testing.T) {
+	var handler *TestValueHandler
+	req := httptest.NewRequest(http.MethodGet, "/value?name=easygin", nil)
+	err := bindHandlerErrorForTest(t, handler, req, nil)
+	if err == nil || !strings.Contains(err.Error(), "is nil") {
+		t.Fatalf("typed nil error = %v, want nil handler error", err)
+	}
+}
+
+// TestBindParamsRejectsAnonymousHandler 验证匿名结构体不会污染基于命名类型的字段缓存。
+func TestBindParamsRejectsAnonymousHandler(t *testing.T) {
+	handler := struct{ TestValueHandler }{}
+	req := httptest.NewRequest(http.MethodGet, "/value?name=easygin", nil)
+	err := bindHandlerErrorForTest(t, handler, req, nil)
+	if err == nil || !strings.Contains(err.Error(), "named struct") {
+		t.Fatalf("anonymous handler error = %v, want named struct error", err)
+	}
+}
+
+// TestMultipartFormCleanupRemovesTemporaryFiles 验证请求结束后清理由上传触发的磁盘临时文件。
+func TestMultipartFormCleanupRemovesTemporaryFiles(t *testing.T) {
+	previousLimit := GetMultipartMemoryLimit()
+	SetMultipartMemoryLimit(1)
+	t.Cleanup(func() {
+		SetMultipartMemoryLimit(previousLimit)
+	})
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", "large.bin")
+	if err != nil {
+		t.Fatalf("create multipart file: %v", err)
+	}
+	if _, err := part.Write(bytes.Repeat([]byte("x"), 64*1024)); err != nil {
+		t.Fatalf("write multipart file: %v", err)
+	}
+	contentType := writer.FormDataContentType()
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	var temporaryPath string
+	req := httptest.NewRequest(http.MethodPost, "/upload", body)
+	req.Header.Set("Content-Type", contentType)
+	req = req.WithContext(context.WithValue(req.Context(), testMultipartPathKey{}, &temporaryPath))
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(multipartFormCleanup())
+	engine.POST("/upload", renderAPI(&TestMultipartCleanupHandler{}, "test.multipartCleanup"))
+
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if temporaryPath == "" {
+		t.Fatal("multipart file was not stored on disk")
+	}
+	if _, err := os.Stat(temporaryPath); !os.IsNotExist(err) {
+		t.Fatalf("temporary file still exists at %s: %v", temporaryPath, err)
+	}
 }
 
 func bindHandlerForTest(t *testing.T, handler RouterHandler, req *http.Request, customize func(*gin.Context)) RouterHandler {
@@ -579,6 +666,24 @@ type TestEmptyIntQueryHandler struct {
 	Age int `in:"query" name:"age"`
 }
 
+// TestValueHandler 验证结构体值处理器的反射绑定。
+type TestValueHandler struct {
+	Name string `in:"query" name:"name"`
+}
+
+// testMultipartPathKey 用于从处理器向测试传递临时文件路径。
+type testMultipartPathKey struct{}
+
+// TestMultipartCleanupHandler 验证 Multipart 文件的请求级清理。
+type TestMultipartCleanupHandler struct {
+	Body *TestMultipartCleanupBody `in:"body" mime:"multipart"`
+}
+
+// TestMultipartCleanupBody 定义清理测试的上传字段。
+type TestMultipartCleanupBody struct {
+	File *multipart.FileHeader `name:"file"`
+}
+
 type TestPathHeaderHandler struct {
 	*TestPathLayer
 }
@@ -651,6 +756,31 @@ func (h *TestPresenceHandler) Output(ctx context.Context) (any, error) {
 
 func (h *TestEmptyIntQueryHandler) Output(ctx context.Context) (any, error) {
 	return nil, nil
+}
+
+func (TestValueHandler) Output(ctx context.Context) (any, error) {
+	return nil, nil
+}
+
+func (h *TestMultipartCleanupHandler) Output(ctx context.Context) (any, error) {
+	file, err := h.Body.File.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	osFile, ok := file.(*os.File)
+	if !ok {
+		return nil, fmt.Errorf("multipart file type = %T, want *os.File", file)
+	}
+	path, ok := ctx.Value(testMultipartPathKey{}).(*string)
+	if !ok {
+		return nil, fmt.Errorf("temporary path capture missing")
+	}
+	*path = osFile.Name()
+	return "ok", nil
 }
 
 func (h *TestMultipartFilesHandler) Output(ctx context.Context) (any, error) {

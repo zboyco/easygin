@@ -89,15 +89,15 @@ func (e *Error) Format(f fmt.State, c rune) {
 	switch c {
 	case 'v':
 		if f.Flag('+') {
-			fmt.Fprintf(f, "Code: %d\n", e.C)
-			fmt.Fprintf(f, "Message: %s\n", e.M)
-			fmt.Fprintf(f, "Description: %s\n", e.D)
+			_, _ = fmt.Fprintf(f, "Code: %d\n", e.C)
+			_, _ = fmt.Fprintf(f, "Message: %s\n", e.M)
+			_, _ = fmt.Fprintf(f, "Description: %s\n", e.D)
 			if e.err != nil {
-				fmt.Fprintf(f, "\nWrapped error:\n")
+				_, _ = fmt.Fprintf(f, "\nWrapped error:\n")
 				if formatter, ok := e.err.(fmt.Formatter); ok {
 					formatter.Format(f, c)
 				} else {
-					fmt.Fprintf(f, "%v", e.err)
+					_, _ = fmt.Fprintf(f, "%v", e.err)
 				}
 			}
 			return
@@ -108,16 +108,16 @@ func (e *Error) Format(f fmt.State, c rune) {
 	case 's':
 		// %s 格式：简单字符串
 		if e.D != "" {
-			fmt.Fprintf(f, "%s: %s", e.M, e.D)
+			_, _ = fmt.Fprintf(f, "%s: %s", e.M, e.D)
 		} else {
-			fmt.Fprintf(f, "%s", e.M)
+			_, _ = fmt.Fprintf(f, "%s", e.M)
 		}
 	case 'q':
 		// %q 格式：带引号的字符串
 		if e.D != "" {
-			fmt.Fprintf(f, "%q: %q", e.M, e.D)
+			_, _ = fmt.Fprintf(f, "%q: %q", e.M, e.D)
 		} else {
-			fmt.Fprintf(f, "%q", e.M)
+			_, _ = fmt.Fprintf(f, "%q", e.M)
 		}
 	}
 }

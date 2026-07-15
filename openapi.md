@@ -11,10 +11,10 @@
 - 签名: `func GenerateOpenAPI(groups ...*RouterGroup) error`
 - 功能: 为给定的路由组生成 OpenAPI 3.0.3 规范文档
 - 流程:
-  1. 初始化已处理类型的映射 `processedTypes`（每次生成都会重置）
-  2. 创建 OpenAPI 规范文档结构
-  3. 遍历所有路由组，生成路径信息
-  4. 将文档序列化为 JSON 并保存到文件
+  1. 创建 OpenAPI 规范文档结构
+  2. 遍历所有路由组，生成路径与组件信息
+  3. 执行 OpenAPI 3.0.3 完整规范校验
+  4. 将文档序列化为 JSON，并通过同目录临时文件原子替换旧文件
 - 输出文件固定为当前工作目录下的 `openapi.json`，可通过 `NewOpenAPIRouter` 或 `OpenAPIRouter` 暴露访问
 
 ### generateOperationID
@@ -33,10 +33,10 @@
 - 签名: `func generateGroupPaths(doc *openapi3.T, group *RouterGroup, parentPath string, parentMiddlewareParams ...*openapi3.ParameterRef) error`
 - 功能: 递归处理路由组，生成 OpenAPI 路径信息
 - 处理内容:
-  1. 处理中间件参数，包括继承父路由组的中间件参数；仅允许 `path/query/header`，遇到 `in:"body"` 会 panic，支持 `desc` 描述
+  1. 处理中间件参数，包括继承父路由组的中间件参数；仅允许 `path/query/header`，遇到 `in:"body"` 会返回错误，支持 `desc` 描述
   2. 使用 `joinURLPath` 拼接路径并将 `:param` 转为 `{param}`
   3. 标签以 RouterGroup 完整路径命名，按需添加
-  4. 为每个 API 生成 operationId（通过 `generateOperationID` 函数）
+  4. 为每个 API 生成 operationId；`ANY` 路由按具体 HTTP 方法生成唯一后缀
   5. 默认挂载 `default` 响应（携带 `Error` Schema），未实现 `RouterResponse` 时自动添加 200 响应
   6. `RouterResponse` 的响应体为 `nil` 时只生成响应描述，不生成 `content`
   7. 递归处理子组，传递当前组的中间件参数
@@ -48,10 +48,10 @@
   1. 处理嵌入字段：`in:"body"` 直接生成请求体，其余 `in` 标签按普通字段处理；无 `in` 标签的嵌入 struct 会递归展开
   2. 处理带有 `in` 标签的字段，支持 `desc` 描述和 `omitempty` 控制 OpenAPI required 标记；required 表示参数必须出现，不表示值必须非空或非零
   3. `mime:"multipart"` 会将请求体 content-type 设置为 `multipart/form-data`，并在 Schema 生成时以表单字段名解析
-  4. 防止循环引用的处理，复用 `processedTypes` 映射
+  4. 使用当前递归路径集合防止循环嵌入，并允许不同分支复用同一嵌入类型
 
 ### generateSchema
-- 签名: `func generateSchema(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3.Schema`
+- 签名: `func generateSchema(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3.SchemaRef`
 - 功能: 生成 OpenAPI Schema 对象
 - 特性:
   1. 处理指针类型
@@ -59,18 +59,18 @@
   3. 实现 `encoding.TextUnmarshaler` 的命名类型统一映射为字符串；`time.Time` 本身不走该分支，仍按 `date-time` 处理
   4. 将结构体类型添加到 components/schemas，组件名使用 `snakeToPascalCase` 规整化
   5. 支持引用已定义的组件
-  6. 使用 `processedTypes` 映射跟踪已处理类型，避免无限递归；已处理类型直接返回 `$ref` 扩展字段（不包 allOf）
+  6. 先注册组件占位再生成内容，使用标准 `SchemaRef.Ref` 和已解析值打断循环引用
 
 ### generateSchemaValue
 - 签名: `func generateSchemaValue(doc *openapi3.T, t reflect.Type, isMultipart bool) *openapi3.Schema`
 - 功能: 根据 Go 类型生成 OpenAPI Schema 值
 - 特性:
-  1. 处理结构体 (对象)，嵌入字段的属性与必填信息会合并到父级；支持 `desc` 描述；必填信息同样表示字段必须出现
+  1. 处理结构体 (对象)，值或指针形式的嵌入字段都会展开，属性与必填信息会合并到父级；支持 `desc` 描述
   2. 基本类型 (字符串、整数、浮点数、布尔值)
-  3. 数组和切片（遇到正在处理的组件时使用 `$ref` 避免循环）
+  3. 数组和切片（组件已注册时使用标准 `$ref` 避免循环）
   4. Map 类型（仅允许字符串键，否则 panic 提示）
   5. 接口类型处理
-  6. 自嵌套类型使用 `$ref` 扩展字段直接引用并附带 `title`，避免 allOf
+  6. 自嵌套类型使用标准 `$ref`；字段描述需要包裹引用时使用合法的 `allOf`
   7. 支持根据 JSON 标签中的类型指定（如 `json:"field,string"`）生成相应的 OpenAPI 类型
   8. `isMultipart` 为 true 时使用 `name` 标签解析字段名并识别 `omitempty`，用于 multipart/form-data 表单
   9. 实现 `TextUnmarshaler` 的字段和自定义时间/文件别名在 Schema 中按字符串/二进制格式输出
@@ -109,12 +109,10 @@
 ### isFileHeaderTypeOrAlias
 - 功能: 判断类型是否可转换为 `multipart.FileHeader`，在 Schema 中映射为 `string` + `binary` 格式
 
-## 全局变量
+## 生成状态
 
-### processedTypes
-- 类型: `map[string]bool`
-- 功能: 跟踪已处理的类型，避免重复处理和无限递归
-- 用途: 解决自嵌套类型和循环引用问题，确保生成的 OpenAPI 文档正确
+- OpenAPI 生成不使用包级可变状态；每次调用创建独立文档和组件表。
+- 命名结构体会先在 `components/schemas` 注册占位，再递归生成字段，从而安全处理自嵌套和循环引用。
 
 ## 路由结构体
 
@@ -174,17 +172,17 @@
 
 5. **组件复用**:
    - 将复杂类型添加到 components/schemas
-   - 使用 `$ref` 扩展字段直接引用，不使用 `allOf` 包装
+   - 使用标准 `SchemaRef.Ref` 引用组件；字段描述需要作为引用 sibling 时使用 `allOf` 包装
 
 6. **循环引用处理**:
-   - 使用 `processedTypes` 映射跟踪已处理类型（含数组元素、结构体、指针）
-   - 对于自嵌套类型，使用 `$ref` 扩展字段直接引用
-   - 为自嵌套引用添加 `title` 属性，帮助识别引用类型
+   - 通过组件占位和当前递归路径集合跟踪结构体、数组元素及匿名嵌入指针
+   - 对于自嵌套类型，使用标准 `$ref` 引用已注册组件
    - 处理数组元素中的循环引用
 
 ## 文件生成
 
 - 输出文件: `openapi.json`
 - 格式: JSON 格式的 OpenAPI 3.0.3 规范文档
+- 写入保障: 规范校验通过后使用同目录临时文件原子替换，失败时保留旧文件
 - 访问方式: 通过 OpenAPI 路由或直接访问文件
 - 可视化: 通过 Swagger UI 界面查看和测试 API

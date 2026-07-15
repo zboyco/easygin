@@ -40,7 +40,8 @@
   - `pkgAliases map[string]string` - 外部包别名表
 - 规则:
   - 匿名嵌入 struct 且 `in:"body"` 时直接走 `generateBodyBinding`
-  - 匿名嵌入 struct 且无 `in` 标签则递归展开子字段
+  - 匿名嵌入 struct 且无 `in` 标签则使用完整字段路径递归展开子字段
+  - 匿名嵌入指针在访问子字段前逐层初始化，并通过类型访问记录防止递归嵌入无限展开
   - 匿名嵌入为非 struct 且带 `in` 标签时按普通字段处理
 
 ### 4. 参数绑定生成函数
@@ -74,8 +75,8 @@
 ### 6. 辅助函数
 - `processRouterGroup`: 处理路由组中的所有API
 - `generateFileContent`: 生成文件内容，去重同类型 API，排序包名保证生成结果稳定；分两遍生成，先统计基础包用量并收集外部类型包，再生成别名表并输出最终方法与导入；任一 API 的参数类型不支持静态生成时返回错误并中止写文件
-- `generateFileForPackage`: 为指定包生成文件，运行时/模块目录/go build 多策略定位包路径并确保目录存在后写入
-- `collectExternalPackages`: 收集结构体中所有字段的外部包，使用别名表匹配类型引用
+- `generateFileForPackage`: 为指定包生成文件，运行时/模块目录/go build 多策略定位包路径；内容先经 `format.Source` 校验，再通过同目录临时文件原子替换
+- `collectExternalPackages`: 收集结构体中所有字段的外部包，使用别名表匹配类型引用，并防止递归类型无限遍历
 - `resolveImportAlias`: 根据包路径获取别名（无别名时取包名）
 - `buildImportAliases`: 构建外部包别名表，避免与已使用包名冲突
 - `markUsedImports`: 扫描生成的方法代码，统计基础包的实际使用情况；JSON 多值防护会按需启用 `io` 导入

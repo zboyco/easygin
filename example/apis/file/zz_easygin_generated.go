@@ -71,4 +71,3 @@ func (r *UploadFile) EasyGinBindParameters(c *gin.Context) error {
 	}
 	return nil
 }
-

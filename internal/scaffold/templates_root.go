@@ -1,7 +1,5 @@
 package scaffold
 
-import "os"
-
 func projectTemplates() []projectFile {
 	files := make([]projectFile, 0, len(rootTemplates())+len(apiTemplates())+len(internalTemplates()))
 	files = append(files, rootTemplates()...)
@@ -24,14 +22,6 @@ func textFile(path, content string) projectFile {
 		Path:    path,
 		Content: content,
 		Mode:    0o644,
-	}
-}
-
-func executableFile(path, content string) projectFile {
-	return projectFile{
-		Path:    path,
-		Content: content,
-		Mode:    os.FileMode(0o755),
 	}
 }
 

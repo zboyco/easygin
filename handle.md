@@ -157,7 +157,7 @@
 - 请求体: 从HTTP请求体中提取，支持JSON和multipart表单
 
 ### 2. 绑定过程
-1. 创建新的结构体实例
+1. 校验处理器为非 nil 的结构体值或结构体指针，并创建新的结构体指针实例
 2. 检查是否实现了WithBindParameters接口
    - 如果实现了，调用EasyGinBindParameters方法
    - 否则，使用反射进行参数绑定
@@ -168,7 +168,7 @@
 7. 进行类型转换和赋值
 
 ### 3. 特殊处理
-- multipart表单: 解析表单数据，处理文件上传
+- multipart表单: 解析表单数据，处理文件上传；完整请求处理链结束后统一调用 `MultipartForm.RemoveAll` 清理落盘临时文件
 - JSON请求体: 解析JSON数据，支持嵌套结构；连续多个 JSON 值会被 `decodeJSON` 拒绝
 - 时间类型: 特殊处理时间格式
 - 指针类型: 缺失的可选参数保持 nil；显式空字符串绑定到 `*string` 时会得到非 nil 的空字符串指针

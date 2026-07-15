@@ -244,11 +244,16 @@ func getOrInitFieldByIndex(v reflect.Value, index []int) (reflect.Value, error) 
 
 // bindParams 统一处理参数绑定逻辑
 func bindParams(c *gin.Context, h RouterHandler) (RouterHandler, error) {
-	// 获取接口的真实类型
-	handlerType := reflect.TypeOf(h)
+	handlerType, err := routerHandlerStructType(h)
+	if err != nil {
+		return nil, err
+	}
 
 	// 创建新的结构体实例
-	newHandler := reflect.New(handlerType.Elem()).Interface().(RouterHandler)
+	newHandler, ok := reflect.New(handlerType).Interface().(RouterHandler)
+	if !ok {
+		return nil, fmt.Errorf("router handler %s pointer does not implement RouterHandler", handlerType)
+	}
 	if bindParameters, ok := newHandler.(WithBindParameters); ok {
 		if err := bindParameters.EasyGinBindParameters(c); err != nil {
 			return nil, err
@@ -259,7 +264,7 @@ func bindParams(c *gin.Context, h RouterHandler) (RouterHandler, error) {
 	handlerValue := reflect.ValueOf(newHandler).Elem()
 
 	// 获取缓存的字段信息
-	fields := getStructFields(handlerType.Elem())
+	fields := getStructFields(handlerType)
 
 	// 遍历字段信息
 	for _, info := range fields {
@@ -359,6 +364,23 @@ func bindParams(c *gin.Context, h RouterHandler) (RouterHandler, error) {
 	}
 
 	return newHandler, nil
+}
+
+// multipartFormCleanup 在请求处理完成后删除 ParseMultipartForm 创建的临时文件。
+// 清理通过 defer 执行，确保后续处理器发生 panic 时也不会遗留上传文件。
+func multipartFormCleanup() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		defer func() {
+			if c.Request == nil || c.Request.MultipartForm == nil {
+				return
+			}
+			if err := c.Request.MultipartForm.RemoveAll(); err != nil {
+				_ = c.Error(fmt.Errorf("remove multipart temporary files: %w", err))
+			}
+		}()
+
+		c.Next()
+	}
 }
 
 // renderAPI 处理API

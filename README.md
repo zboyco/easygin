@@ -185,6 +185,8 @@ func (req *ListUser) Output(ctx context.Context) (any, error) {
 
 查询参数切片会使用同名参数数组解析，例如 `?tag_id=1&tag_id=2`。该能力依赖生成的静态参数绑定方法；未生成静态绑定时，运行时反射绑定按单值参数处理，不支持 query 切片。静态参数绑定支持 `[]T`、`*[]T`、`[]*T`、`*[]*T` 形态，元素类型支持 `string`、`bool`、各整数/浮点类型，以及实现 `encoding.TextUnmarshaler` 的自定义类型（含指针接收者的 `UnmarshalText`）。
 
+API 和中间件处理器可以使用命名结构体值或命名结构体指针注册；easygin 会为每次请求创建新的处理器指针并绑定参数。`nil`、typed nil、匿名结构体和非结构体处理器会在注册或生成阶段返回明确错误。
+
 #### JSON请求体绑定
 
 ```go
@@ -236,6 +238,8 @@ func (req *UploadFile) Output(ctx context.Context) (any, error) {
     return nil, nil
 }
 ```
+
+超过 `SetMultipartMemoryLimit` 的文件内容会由 Go 写入临时目录。easygin 会在完整请求处理链结束后统一删除这些临时文件，因此应在 `Output` 或其同步调用链内完成文件读取，不要在请求结束后继续持有上传文件路径。
 
 #### 文件下载
 
@@ -485,6 +489,8 @@ go run main.go gen
 
 这将为每个包生成 `zz_easygin_generated.go` 文件，包含静态的参数绑定方法。   
 
+匿名嵌入指针会在生成代码中逐层初始化，并使用完整字段路径绑定，行为与运行时反射绑定一致。生成内容会先经过 `gofmt` 语法格式化，再通过同目录临时文件原子替换旧文件；生成失败不会覆盖上一份有效产物。
+
 生成期间如果遇到静态绑定暂不支持的参数类型，命令会直接返回错误并以非 0 状态退出，不会把 `unsupported` 分支写入生成文件。例如不支持的 query 切片类型会输出类似：
 
 ```text
@@ -508,13 +514,13 @@ easygin 提供了生成OpenAPI文档的功能：
 go run main.go openapi
 ```
 
-这将在当前目录下生成 `openapi.json` 文件。   
+这将在当前目录下生成 `openapi.json` 文件。写盘前会执行 OpenAPI 3.0.3 规范校验，校验失败时保留上一份有效文档。
 
 ![OpenAPI文档生成演示](https://raw.githubusercontent.com/zboyco/easygin/main/example/openapi.gif)   
 
 > 内部实际调用了`easygin.GenerateOpenAPI`方法，该方法使用反射实现，有一定的耗时，可以根据需要在程序运行前手动生成，也可以在运行时自动生成文档，建议提前生成。
 
-OpenAPI Schema 会把实现 `encoding.TextUnmarshaler` 的类型映射为 `string`，`time.Time` 及其别名映射为 `string` + `date-time`，`multipart.FileHeader` 及其别名映射为 `string` + `binary`。结构体组件会复用 `components/schemas`，循环引用会使用 `$ref` 避免无限展开。
+OpenAPI Schema 会把实现 `encoding.TextUnmarshaler` 的类型映射为 `string`，`time.Time` 及其别名映射为 `string` + `date-time`，`multipart.FileHeader` 及其别名映射为 `string` + `binary`。结构体组件会复用 `components/schemas`，循环引用会使用标准 `$ref` 避免无限展开；匿名嵌入指针会展开其字段。请求体和路径参数按运行时语义标记为必填，`ANY` 路由展开后会为每种 HTTP 方法生成唯一 operationId。
 
 ### 文件处理
 

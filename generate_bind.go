@@ -5,6 +5,7 @@ import (
 	"encoding"
 	"fmt"
 	"go/build"
+	"go/format"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -42,14 +43,9 @@ func GenerateParametersBindFunction(groups ...*RouterGroup) error {
 
 		// 按包路径分组
 		for _, api := range apis {
-			if api == nil {
-				fmt.Println("Warning: nil API found after processing router group")
-				continue
-			}
-
-			apiType := reflect.TypeOf(api)
-			if apiType.Kind() == reflect.Ptr {
-				apiType = apiType.Elem()
+			apiType, err := routerHandlerStructType(api)
+			if err != nil {
+				return fmt.Errorf("invalid API for parameter generation: %w", err)
 			}
 			pkgPath := apiType.PkgPath()
 			if pkgPath == "" {
@@ -87,7 +83,7 @@ func generateBindParametersMethod(t reflect.Type, currentPkgPath string, pkgAlia
 	var builder strings.Builder
 
 	// 写入方法签名
-	builder.WriteString(fmt.Sprintf("func (r *%s) EasyGinBindParameters(c *gin.Context) error {\n", t.Name()))
+	_, _ = fmt.Fprintf(&builder, "func (r *%s) EasyGinBindParameters(c *gin.Context) error {\n", t.Name())
 
 	// 处理所有字段
 	if err := processAllFields(&builder, t, "r", currentPkgPath, pkgAliases); err != nil {
@@ -103,6 +99,17 @@ func generateBindParametersMethod(t reflect.Type, currentPkgPath string, pkgAlia
 
 // processAllFields 处理所有字段，包括嵌入字段
 func processAllFields(builder *strings.Builder, t reflect.Type, prefix string, currentPkgPath string, pkgAliases map[string]string) error {
+	return processAllFieldsRecursive(builder, t, prefix, currentPkgPath, pkgAliases, make(map[reflect.Type]bool))
+}
+
+// processAllFieldsRecursive 递归生成字段绑定，并初始化匿名嵌入指针。
+func processAllFieldsRecursive(builder *strings.Builder, t reflect.Type, prefix string, currentPkgPath string, pkgAliases map[string]string, visiting map[reflect.Type]bool) error {
+	if visiting[t] {
+		return nil
+	}
+	visiting[t] = true
+	defer delete(visiting, t)
+
 	// 处理所有字段
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
@@ -110,20 +117,29 @@ func processAllFields(builder *strings.Builder, t reflect.Type, prefix string, c
 		// 处理嵌入字段
 		if field.Anonymous {
 			embedType := field.Type
+			isPointer := embedType.Kind() == reflect.Ptr
 			if embedType.Kind() == reflect.Ptr {
 				embedType = embedType.Elem()
 			}
 			inTag := field.Tag.Get("in")
 			if embedType.Kind() == reflect.Struct {
+				fieldName := fmt.Sprintf("%s.%s", prefix, field.Name)
 				// 检查是否有in:"body"标签
 				if inTag == "body" {
 					// 如果有in:"body"，调用generateBodyBinding处理
-					if err := generateBodyBinding(builder, fmt.Sprintf("%s.%s", prefix, field.Name), field, currentPkgPath, pkgAliases); err != nil {
+					if err := generateBodyBinding(builder, fieldName, field, currentPkgPath, pkgAliases); err != nil {
 						return err
 					}
 				} else {
+					if isPointer {
+						typeName := getTypeNameWithPkg(embedType, currentPkgPath, pkgAliases)
+						_, _ = fmt.Fprintf(builder, "\t// 初始化匿名嵌入字段 %s\n", field.Name)
+						_, _ = fmt.Fprintf(builder, "\tif %s == nil {\n", fieldName)
+						_, _ = fmt.Fprintf(builder, "\t\t%s = new(%s)\n", fieldName, typeName)
+						builder.WriteString("\t}\n\n")
+					}
 					// 递归处理嵌入字段
-					if err := processAllFields(builder, embedType, prefix, currentPkgPath, pkgAliases); err != nil {
+					if err := processAllFieldsRecursive(builder, embedType, fieldName, currentPkgPath, pkgAliases, visiting); err != nil {
 						return err
 					}
 				}
@@ -199,9 +215,9 @@ func processAllFields(builder *strings.Builder, t reflect.Type, prefix string, c
 
 // generatePathBinding 生成路径参数绑定代码
 func generatePathBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string, pkgAliases map[string]string) error {
-	builder.WriteString(fmt.Sprintf("\t// 绑定路径参数 %s\n", paramName))
+	_, _ = fmt.Fprintf(builder, "\t// 绑定路径参数 %s\n", paramName)
 	builder.WriteString("\t{\n") // 添加代码块开始
-	builder.WriteString(fmt.Sprintf("\t\tpathVal := c.Param(\"%s\")\n", paramName))
+	_, _ = fmt.Fprintf(builder, "\t\tpathVal := c.Param(\"%s\")\n", paramName)
 
 	// 检查是否必填
 	tagNames := strings.Split(field.Tag.Get("name"), ",")
@@ -215,7 +231,7 @@ func generatePathBinding(builder *strings.Builder, fieldName, paramName string, 
 
 	if !isOmitempty {
 		builder.WriteString("\t\tif pathVal == \"\" {\n")
-		builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required parameter '%s' in path\")\n", paramName))
+		fmt.Fprintf(builder, "\t\t\treturn errors.New(\"missing required parameter '%s' in path\")\n", paramName)
 		builder.WriteString("\t\t}\n")
 	} else {
 		// 处理默认值
@@ -224,7 +240,7 @@ func generatePathBinding(builder *strings.Builder, fieldName, paramName string, 
 			// 检查默认值与字段类型是否匹配
 			if isDefaultValueValid(defaultValue, field.Type) {
 				builder.WriteString("\t\tif pathVal == \"\" {\n")
-				builder.WriteString(fmt.Sprintf("\t\t\tpathVal = \"%s\"\n", defaultValue))
+				fmt.Fprintf(builder, "\t\t\tpathVal = \"%s\"\n", defaultValue)
 				builder.WriteString("\t\t}\n")
 			} else {
 				return fmt.Errorf("default value %q does not match the field type for parameter %q", defaultValue, paramName)
@@ -249,7 +265,7 @@ func generatePathBinding(builder *strings.Builder, fieldName, paramName string, 
 
 // generateQueryBinding 生成查询参数绑定代码
 func generateQueryBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string, pkgAliases map[string]string) error {
-	builder.WriteString(fmt.Sprintf("\t// 绑定查询参数 %s\n", paramName))
+	fmt.Fprintf(builder, "\t// 绑定查询参数 %s\n", paramName)
 	builder.WriteString("\t{\n") // 添加代码块开始
 	fieldType := field.Type
 	isSlicePtr := false
@@ -276,11 +292,11 @@ func generateQueryBinding(builder *strings.Builder, fieldName, paramName string,
 		return fmt.Errorf("unsupported query slice parameter type %q for field %s", fieldType.String(), fieldName)
 	}
 
-	builder.WriteString(fmt.Sprintf("\t\tqueryVal, queryOK := c.GetQuery(\"%s\")\n", paramName))
+	fmt.Fprintf(builder, "\t\tqueryVal, queryOK := c.GetQuery(\"%s\")\n", paramName)
 
 	if !isOmitempty {
 		builder.WriteString("\t\tif !queryOK {\n")
-		builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required parameter '%s' in query\")\n", paramName))
+		fmt.Fprintf(builder, "\t\t\treturn errors.New(\"missing required parameter '%s' in query\")\n", paramName)
 		builder.WriteString("\t\t}\n")
 	} else {
 		// 处理默认值
@@ -288,7 +304,7 @@ func generateQueryBinding(builder *strings.Builder, fieldName, paramName string,
 		if defaultValue != "" {
 			if isDefaultValueValid(defaultValue, field.Type) {
 				builder.WriteString("\t\tif !queryOK {\n")
-				builder.WriteString(fmt.Sprintf("\t\t\tqueryVal = \"%s\"\n", defaultValue))
+				fmt.Fprintf(builder, "\t\t\tqueryVal = \"%s\"\n", defaultValue)
 				builder.WriteString("\t\t\tqueryOK = true\n")
 				builder.WriteString("\t\t}\n")
 			} else {
@@ -324,17 +340,17 @@ func generateQuerySliceBinding(builder *strings.Builder, fieldName, paramName st
 
 	baseKind := baseType.Kind()
 	textInfo, isTextUnmarshaler := getTextUnmarshalInfo(baseType, currentPkgPath, pkgAliases)
-	if !isTextUnmarshaler && !(baseKind == reflect.String || baseKind == reflect.Bool || isSignedIntKind(baseKind) || isUnsignedIntKind(baseKind) || isFloatKind(baseKind)) {
+	if !isTextUnmarshaler && baseKind != reflect.String && baseKind != reflect.Bool && !isSignedIntKind(baseKind) && !isUnsignedIntKind(baseKind) && !isFloatKind(baseKind) {
 		return false
 	}
 	if !isTextUnmarshaler && baseType.PkgPath() != "" {
 		return false
 	}
 
-	builder.WriteString(fmt.Sprintf("\t\tqueryVals := c.QueryArray(\"%s\")\n", paramName))
+	fmt.Fprintf(builder, "\t\tqueryVals := c.QueryArray(\"%s\")\n", paramName)
 	if !isOmitempty {
 		builder.WriteString("\t\tif len(queryVals) == 0 {\n")
-		builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required parameter '%s' in query\")\n", paramName))
+		fmt.Fprintf(builder, "\t\t\treturn errors.New(\"missing required parameter '%s' in query\")\n", paramName)
 		builder.WriteString("\t\t}\n")
 	}
 	builder.WriteString("\t\tif len(queryVals) > 0 {\n")
@@ -342,7 +358,7 @@ func generateQuerySliceBinding(builder *strings.Builder, fieldName, paramName st
 	switch {
 	case isTextUnmarshaler:
 		sliceTypeName := getSliceTypeNameWithPkg(sliceType, currentPkgPath, pkgAliases)
-		builder.WriteString(fmt.Sprintf("\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceTypeName))
+		fmt.Fprintf(builder, "\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceTypeName)
 		builder.WriteString("\t\t\tfor _, val := range queryVals {\n")
 		writeTextUnmarshalSliceAppend(builder, "convertedVals", "val", paramName, textInfo, isElemPtr)
 		builder.WriteString("\t\t\t}\n")
@@ -350,7 +366,7 @@ func generateQuerySliceBinding(builder *strings.Builder, fieldName, paramName st
 	case baseKind == reflect.String:
 		if isElemPtr {
 			sliceTypeName := getSliceTypeNameWithPkg(sliceType, currentPkgPath, pkgAliases)
-			builder.WriteString(fmt.Sprintf("\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceTypeName))
+			fmt.Fprintf(builder, "\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceTypeName)
 			builder.WriteString("\t\t\tfor _, val := range queryVals {\n")
 			builder.WriteString("\t\t\t\tvalCopy := val\n")
 			builder.WriteString("\t\t\t\tconvertedVals = append(convertedVals, &valCopy)\n")
@@ -359,68 +375,68 @@ func generateQuerySliceBinding(builder *strings.Builder, fieldName, paramName st
 		} else {
 			if isSlicePtr {
 				builder.WriteString("\t\t\tvaluesCopy := queryVals\n")
-				builder.WriteString(fmt.Sprintf("\t\t\t%s = &valuesCopy\n", fieldName))
+				fmt.Fprintf(builder, "\t\t\t%s = &valuesCopy\n", fieldName)
 			} else {
-				builder.WriteString(fmt.Sprintf("\t\t\t%s = queryVals\n", fieldName))
+				fmt.Fprintf(builder, "\t\t\t%s = queryVals\n", fieldName)
 			}
 		}
 	case isSignedIntKind(baseKind):
 		sliceTypeName := getSliceTypeNameWithPkg(sliceType, currentPkgPath, pkgAliases)
 		baseTypeName := getTypeNameWithPkg(baseType, currentPkgPath, pkgAliases)
-		builder.WriteString(fmt.Sprintf("\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceTypeName))
+		fmt.Fprintf(builder, "\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceTypeName)
 		builder.WriteString("\t\t\tfor _, val := range queryVals {\n")
-		builder.WriteString(fmt.Sprintf("\t\t\t\tparsedVal, err := strconv.ParseInt(val, 10, %d)\n", baseType.Bits()))
+		fmt.Fprintf(builder, "\t\t\t\tparsedVal, err := strconv.ParseInt(val, 10, %d)\n", baseType.Bits())
 		builder.WriteString("\t\t\t\tif err != nil {\n")
-		builder.WriteString(fmt.Sprintf("\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
+		fmt.Fprintf(builder, "\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName)
 		builder.WriteString("\t\t\t\t}\n")
 		if isElemPtr {
-			builder.WriteString(fmt.Sprintf("\t\t\t\tvalCopy := %s(parsedVal)\n", baseTypeName))
+			fmt.Fprintf(builder, "\t\t\t\tvalCopy := %s(parsedVal)\n", baseTypeName)
 			builder.WriteString("\t\t\t\tconvertedVals = append(convertedVals, &valCopy)\n")
 		} else {
-			builder.WriteString(fmt.Sprintf("\t\t\t\tconvertedVals = append(convertedVals, %s(parsedVal))\n", baseTypeName))
+			fmt.Fprintf(builder, "\t\t\t\tconvertedVals = append(convertedVals, %s(parsedVal))\n", baseTypeName)
 		}
 		builder.WriteString("\t\t\t}\n")
 		assignSliceValue(builder, fieldName, "convertedVals", isSlicePtr)
 	case isUnsignedIntKind(baseKind):
 		sliceTypeName := getSliceTypeNameWithPkg(sliceType, currentPkgPath, pkgAliases)
 		baseTypeName := getTypeNameWithPkg(baseType, currentPkgPath, pkgAliases)
-		builder.WriteString(fmt.Sprintf("\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceTypeName))
+		fmt.Fprintf(builder, "\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceTypeName)
 		builder.WriteString("\t\t\tfor _, val := range queryVals {\n")
-		builder.WriteString(fmt.Sprintf("\t\t\t\tparsedVal, err := strconv.ParseUint(val, 10, %d)\n", baseType.Bits()))
+		fmt.Fprintf(builder, "\t\t\t\tparsedVal, err := strconv.ParseUint(val, 10, %d)\n", baseType.Bits())
 		builder.WriteString("\t\t\t\tif err != nil {\n")
-		builder.WriteString(fmt.Sprintf("\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
+		fmt.Fprintf(builder, "\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName)
 		builder.WriteString("\t\t\t\t}\n")
 		if isElemPtr {
-			builder.WriteString(fmt.Sprintf("\t\t\t\tvalCopy := %s(parsedVal)\n", baseTypeName))
+			fmt.Fprintf(builder, "\t\t\t\tvalCopy := %s(parsedVal)\n", baseTypeName)
 			builder.WriteString("\t\t\t\tconvertedVals = append(convertedVals, &valCopy)\n")
 		} else {
-			builder.WriteString(fmt.Sprintf("\t\t\t\tconvertedVals = append(convertedVals, %s(parsedVal))\n", baseTypeName))
+			fmt.Fprintf(builder, "\t\t\t\tconvertedVals = append(convertedVals, %s(parsedVal))\n", baseTypeName)
 		}
 		builder.WriteString("\t\t\t}\n")
 		assignSliceValue(builder, fieldName, "convertedVals", isSlicePtr)
 	case isFloatKind(baseKind):
 		sliceTypeName := getSliceTypeNameWithPkg(sliceType, currentPkgPath, pkgAliases)
 		baseTypeName := getTypeNameWithPkg(baseType, currentPkgPath, pkgAliases)
-		builder.WriteString(fmt.Sprintf("\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceTypeName))
+		fmt.Fprintf(builder, "\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceTypeName)
 		builder.WriteString("\t\t\tfor _, val := range queryVals {\n")
-		builder.WriteString(fmt.Sprintf("\t\t\t\tfloatVal, err := strconv.ParseFloat(val, %d)\n", baseType.Bits()))
+		fmt.Fprintf(builder, "\t\t\t\tfloatVal, err := strconv.ParseFloat(val, %d)\n", baseType.Bits())
 		builder.WriteString("\t\t\t\tif err != nil {\n")
-		builder.WriteString(fmt.Sprintf("\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
+		fmt.Fprintf(builder, "\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName)
 		builder.WriteString("\t\t\t\t}\n")
 		if isElemPtr {
-			builder.WriteString(fmt.Sprintf("\t\t\t\tvalCopy := %s(floatVal)\n", baseTypeName))
+			fmt.Fprintf(builder, "\t\t\t\tvalCopy := %s(floatVal)\n", baseTypeName)
 			builder.WriteString("\t\t\t\tconvertedVals = append(convertedVals, &valCopy)\n")
 		} else {
-			builder.WriteString(fmt.Sprintf("\t\t\t\tconvertedVals = append(convertedVals, %s(floatVal))\n", baseTypeName))
+			fmt.Fprintf(builder, "\t\t\t\tconvertedVals = append(convertedVals, %s(floatVal))\n", baseTypeName)
 		}
 		builder.WriteString("\t\t\t}\n")
 		assignSliceValue(builder, fieldName, "convertedVals", isSlicePtr)
 	case baseKind == reflect.Bool:
-		builder.WriteString(fmt.Sprintf("\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceType.String()))
+		fmt.Fprintf(builder, "\t\t\tconvertedVals := make(%s, 0, len(queryVals))\n", sliceType.String())
 		builder.WriteString("\t\t\tfor _, val := range queryVals {\n")
 		builder.WriteString("\t\t\t\tboolVal, err := strconv.ParseBool(val)\n")
 		builder.WriteString("\t\t\t\tif err != nil {\n")
-		builder.WriteString(fmt.Sprintf("\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
+		fmt.Fprintf(builder, "\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName)
 		builder.WriteString("\t\t\t\t}\n")
 		if isElemPtr {
 			builder.WriteString("\t\t\t\tvalCopy := boolVal\n")
@@ -438,10 +454,10 @@ func generateQuerySliceBinding(builder *strings.Builder, fieldName, paramName st
 
 func assignSliceValue(builder *strings.Builder, fieldName, valueName string, isSlicePtr bool) {
 	if isSlicePtr {
-		builder.WriteString(fmt.Sprintf("\t\t\tvaluesCopy := %s\n", valueName))
-		builder.WriteString(fmt.Sprintf("\t\t\t%s = &valuesCopy\n", fieldName))
+		fmt.Fprintf(builder, "\t\t\tvaluesCopy := %s\n", valueName)
+		fmt.Fprintf(builder, "\t\t\t%s = &valuesCopy\n", fieldName)
 	} else {
-		builder.WriteString(fmt.Sprintf("\t\t\t%s = %s\n", fieldName, valueName))
+		fmt.Fprintf(builder, "\t\t\t%s = %s\n", fieldName, valueName)
 	}
 }
 
@@ -457,28 +473,28 @@ func getSliceTypeNameWithPkg(sliceType reflect.Type, currentPkgPath string, pkgA
 
 func writeTextUnmarshalSliceAppend(builder *strings.Builder, sliceName, valName, paramName string, info textUnmarshalInfo, isElemPtr bool) {
 	if isElemPtr {
-		builder.WriteString(fmt.Sprintf("\t\t\t\tparsedVal := new(%s)\n", info.typeName))
-		builder.WriteString(fmt.Sprintf("\t\t\t\tif err := parsedVal.UnmarshalText([]byte(%s)); err != nil {\n", valName))
-		builder.WriteString(fmt.Sprintf("\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
+		fmt.Fprintf(builder, "\t\t\t\tparsedVal := new(%s)\n", info.typeName)
+		fmt.Fprintf(builder, "\t\t\t\tif err := parsedVal.UnmarshalText([]byte(%s)); err != nil {\n", valName)
+		fmt.Fprintf(builder, "\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName)
 		builder.WriteString("\t\t\t\t}\n")
-		builder.WriteString(fmt.Sprintf("\t\t\t\t%s = append(%s, parsedVal)\n", sliceName, sliceName))
+		fmt.Fprintf(builder, "\t\t\t\t%s = append(%s, parsedVal)\n", sliceName, sliceName)
 		return
 	}
 
 	if info.usePointerReceiver {
-		builder.WriteString(fmt.Sprintf("\t\t\t\tparsedVal := new(%s)\n", info.typeName))
-		builder.WriteString(fmt.Sprintf("\t\t\t\tif err := parsedVal.UnmarshalText([]byte(%s)); err != nil {\n", valName))
-		builder.WriteString(fmt.Sprintf("\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
+		fmt.Fprintf(builder, "\t\t\t\tparsedVal := new(%s)\n", info.typeName)
+		fmt.Fprintf(builder, "\t\t\t\tif err := parsedVal.UnmarshalText([]byte(%s)); err != nil {\n", valName)
+		fmt.Fprintf(builder, "\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName)
 		builder.WriteString("\t\t\t\t}\n")
-		builder.WriteString(fmt.Sprintf("\t\t\t\t%s = append(%s, *parsedVal)\n", sliceName, sliceName))
+		fmt.Fprintf(builder, "\t\t\t\t%s = append(%s, *parsedVal)\n", sliceName, sliceName)
 		return
 	}
 
-	builder.WriteString(fmt.Sprintf("\t\t\t\tvar parsedVal %s\n", info.typeName))
-	builder.WriteString(fmt.Sprintf("\t\t\t\tif err := parsedVal.UnmarshalText([]byte(%s)); err != nil {\n", valName))
-	builder.WriteString(fmt.Sprintf("\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName))
+	fmt.Fprintf(builder, "\t\t\t\tvar parsedVal %s\n", info.typeName)
+	fmt.Fprintf(builder, "\t\t\t\tif err := parsedVal.UnmarshalText([]byte(%s)); err != nil {\n", valName)
+	fmt.Fprintf(builder, "\t\t\t\t\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", paramName)
 	builder.WriteString("\t\t\t\t}\n")
-	builder.WriteString(fmt.Sprintf("\t\t\t\t%s = append(%s, parsedVal)\n", sliceName, sliceName))
+	fmt.Fprintf(builder, "\t\t\t\t%s = append(%s, parsedVal)\n", sliceName, sliceName)
 }
 
 func isSignedIntKind(kind reflect.Kind) bool {
@@ -510,12 +526,12 @@ func isFloatKind(kind reflect.Kind) bool {
 
 // generateHeaderBinding 生成头部参数绑定代码
 func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string, pkgAliases map[string]string) error {
-	builder.WriteString(fmt.Sprintf("\t// 绑定头部参数 %s\n", paramName))
+	fmt.Fprintf(builder, "\t// 绑定头部参数 %s\n", paramName)
 	builder.WriteString("\t{\n") // 添加代码块开始
-	builder.WriteString(fmt.Sprintf("\t\theaderKey := http.CanonicalHeaderKey(\"%s\")\n", paramName))
+	fmt.Fprintf(builder, "\t\theaderKey := http.CanonicalHeaderKey(\"%s\")\n", paramName)
 	builder.WriteString("\t\theaderVals, headerOK := c.Request.Header[headerKey]\n")
-	builder.WriteString(fmt.Sprintf("\t\tif !headerOK && headerKey != \"%s\" {\n", paramName))
-	builder.WriteString(fmt.Sprintf("\t\t\theaderVals, headerOK = c.Request.Header[\"%s\"]\n", paramName))
+	fmt.Fprintf(builder, "\t\tif !headerOK && headerKey != \"%s\" {\n", paramName)
+	fmt.Fprintf(builder, "\t\t\theaderVals, headerOK = c.Request.Header[\"%s\"]\n", paramName)
 	builder.WriteString("\t\t}\n")
 	builder.WriteString("\t\theaderVal := \"\"\n")
 	builder.WriteString("\t\tif len(headerVals) > 0 {\n")
@@ -534,7 +550,7 @@ func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string
 
 	if !isOmitempty {
 		builder.WriteString("\t\tif !headerOK {\n")
-		builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required parameter '%s' in header\")\n", paramName))
+		fmt.Fprintf(builder, "\t\t\treturn errors.New(\"missing required parameter '%s' in header\")\n", paramName)
 		builder.WriteString("\t\t}\n")
 	} else {
 		// 处理默认值
@@ -542,7 +558,7 @@ func generateHeaderBinding(builder *strings.Builder, fieldName, paramName string
 		if defaultValue != "" {
 			if isDefaultValueValid(defaultValue, field.Type) {
 				builder.WriteString("\t\tif !headerOK {\n")
-				builder.WriteString(fmt.Sprintf("\t\t\theaderVal = \"%s\"\n", defaultValue))
+				fmt.Fprintf(builder, "\t\t\theaderVal = \"%s\"\n", defaultValue)
 				builder.WriteString("\t\t\theaderOK = true\n")
 				builder.WriteString("\t\t}\n")
 			} else {
@@ -577,11 +593,11 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 		// 处理匿名结构体的情况
 		if elemType.Name() == "" && elemType.Kind() == reflect.Struct {
 			// 对于匿名结构体，使用new()来创建实例，并格式化结构体定义以提高可读性
-			builder.WriteString(fmt.Sprintf("\t// 实例化 %s\n", strings.TrimPrefix(fieldName, "r.")))
-			builder.WriteString(fmt.Sprintf("\tif %s == nil {\n", fieldName))
+			fmt.Fprintf(builder, "\t// 实例化 %s\n", strings.TrimPrefix(fieldName, "r."))
+			fmt.Fprintf(builder, "\tif %s == nil {\n", fieldName)
 
 			// 开始结构体定义
-			builder.WriteString(fmt.Sprintf("\t\t%s = new(struct {\n", fieldName))
+			fmt.Fprintf(builder, "\t\t%s = new(struct {\n", fieldName)
 
 			// 遍历匿名结构体的字段，每个字段单独一行
 			for i := 0; i < elemType.NumField(); i++ {
@@ -618,9 +634,9 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 				collectExternalPackages(tempMethod, elemType, tempImports, pkgAliases)
 			}
 
-			builder.WriteString(fmt.Sprintf("\t// 实例化 %s\n", strings.TrimPrefix(fieldName, "r.")))
-			builder.WriteString(fmt.Sprintf("\tif %s == nil {\n", fieldName))
-			builder.WriteString(fmt.Sprintf("\t\t%s = &%s{}\n", fieldName, typeName))
+			fmt.Fprintf(builder, "\t// 实例化 %s\n", strings.TrimPrefix(fieldName, "r."))
+			fmt.Fprintf(builder, "\tif %s == nil {\n", fieldName)
+			fmt.Fprintf(builder, "\t\t%s = &%s{}\n", fieldName, typeName)
 			builder.WriteString("\t}\n\n")
 		}
 	}
@@ -661,9 +677,9 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 
 		// 根据字段类型是否为指针决定是否添加&符号
 		if field.Type.Kind() == reflect.Ptr {
-			builder.WriteString(fmt.Sprintf("\t\tif err := decoder.Decode(%s); err != nil {\n", fieldName))
+			fmt.Fprintf(builder, "\t\tif err := decoder.Decode(%s); err != nil {\n", fieldName)
 		} else {
-			builder.WriteString(fmt.Sprintf("\t\tif err := decoder.Decode(&%s); err != nil {\n", fieldName))
+			fmt.Fprintf(builder, "\t\tif err := decoder.Decode(&%s); err != nil {\n", fieldName)
 		}
 
 		builder.WriteString("\t\t\treturn err\n")
@@ -681,7 +697,7 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 		// 使用ValidateJsonRequiredFields进行校验
 		builder.WriteString("\n\t\tif easygin.HandleBodyJsonOmitEmptyAndDefault() {\n")
 		builder.WriteString("\t\t\t// 校验JSON必填字段和默认值\n")
-		builder.WriteString(fmt.Sprintf("\t\t\tif err := easygin.ValidateJsonRequiredFieldsWithRaw(reflect.ValueOf(&%s), bodyBytes); err != nil {\n", fieldName))
+		fmt.Fprintf(builder, "\t\t\tif err := easygin.ValidateJsonRequiredFieldsWithRaw(reflect.ValueOf(&%s), bodyBytes); err != nil {\n", fieldName)
 		builder.WriteString("\t\t\t\treturn err\n")
 		builder.WriteString("\t\t\t}\n")
 		builder.WriteString("\t\t}\n")
@@ -692,7 +708,7 @@ func generateBodyBinding(builder *strings.Builder, fieldName string, field refle
 }
 
 func generateFormBinding(builder *strings.Builder, fieldName, paramName string, field reflect.StructField, currentPkgPath string, pkgAliases map[string]string) error {
-	builder.WriteString(fmt.Sprintf("\t// 绑定表单参数 %s\n", paramName))
+	fmt.Fprintf(builder, "\t// 绑定表单参数 %s\n", paramName)
 	builder.WriteString("\t{\n") // 添加代码块开始
 
 	// 检查是否可为空
@@ -707,46 +723,46 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 
 	// 判断字段类型
 	if field.Type.String() == "*multipart.FileHeader" {
-		builder.WriteString(fmt.Sprintf("\t\tif file, ok := c.Request.MultipartForm.File[\"%s\"]; ok && len(file) > 0 {\n", paramName))
-		builder.WriteString(fmt.Sprintf("\t\t\t%s = file[0]\n", fieldName))
+		fmt.Fprintf(builder, "\t\tif file, ok := c.Request.MultipartForm.File[\"%s\"]; ok && len(file) > 0 {\n", paramName)
+		fmt.Fprintf(builder, "\t\t\t%s = file[0]\n", fieldName)
 		builder.WriteString("\t\t} else {\n")
 		if !isOmitempty {
-			builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required file '%s'\")\n", paramName))
+			fmt.Fprintf(builder, "\t\t\treturn errors.New(\"missing required file '%s'\")\n", paramName)
 		}
 		builder.WriteString("\t\t}\n")
 	} else if field.Type.Kind() == reflect.Slice && field.Type.Elem().String() == "*multipart.FileHeader" {
-		builder.WriteString(fmt.Sprintf("\t\tif files, ok := c.Request.MultipartForm.File[\"%s\"]; ok && len(files) > 0 {\n", paramName))
-		builder.WriteString(fmt.Sprintf("\t\t\t%s = files\n", fieldName))
+		fmt.Fprintf(builder, "\t\tif files, ok := c.Request.MultipartForm.File[\"%s\"]; ok && len(files) > 0 {\n", paramName)
+		fmt.Fprintf(builder, "\t\t\t%s = files\n", fieldName)
 		builder.WriteString("\t\t} else {\n")
 		if !isOmitempty {
-			builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required files '%s'\")\n", paramName))
+			fmt.Fprintf(builder, "\t\t\treturn errors.New(\"missing required files '%s'\")\n", paramName)
 		}
 		builder.WriteString("\t\t}\n")
 	} else if field.Type.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.String {
 		// 处理字符串数组
-		builder.WriteString(fmt.Sprintf("\t\tvalues, valuesOK := c.Request.MultipartForm.Value[\"%s\"]\n", paramName))
+		fmt.Fprintf(builder, "\t\tvalues, valuesOK := c.Request.MultipartForm.Value[\"%s\"]\n", paramName)
 		if !isOmitempty {
 			builder.WriteString("\t\tif !valuesOK {\n")
-			builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required parameter '%s' in form\")\n", paramName))
+			fmt.Fprintf(builder, "\t\t\treturn errors.New(\"missing required parameter '%s' in form\")\n", paramName)
 			builder.WriteString("\t\t}\n")
 		}
 		builder.WriteString("\t\tif valuesOK {\n")
-		builder.WriteString(fmt.Sprintf("\t\t\t%s = values\n", fieldName))
+		fmt.Fprintf(builder, "\t\t\t%s = values\n", fieldName)
 		builder.WriteString("\t\t}\n")
 	} else if field.Type.Kind() == reflect.Ptr && field.Type.Elem().Kind() == reflect.Slice && field.Type.Elem().Elem().Kind() == reflect.String {
 		// 处理字符串数组的指针
-		builder.WriteString(fmt.Sprintf("\t\tvalues, valuesOK := c.Request.MultipartForm.Value[\"%s\"]\n", paramName))
+		fmt.Fprintf(builder, "\t\tvalues, valuesOK := c.Request.MultipartForm.Value[\"%s\"]\n", paramName)
 		if !isOmitempty {
 			builder.WriteString("\t\tif !valuesOK {\n")
-			builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required parameter '%s' in form\")\n", paramName))
+			fmt.Fprintf(builder, "\t\t\treturn errors.New(\"missing required parameter '%s' in form\")\n", paramName)
 			builder.WriteString("\t\t}\n")
 		}
 		builder.WriteString("\t\tif valuesOK {\n")
-		builder.WriteString(fmt.Sprintf("\t\t\t%s = &values\n", fieldName))
+		fmt.Fprintf(builder, "\t\t\t%s = &values\n", fieldName)
 		builder.WriteString("\t\t}\n")
 	} else {
 		// 处理其他类型
-		builder.WriteString(fmt.Sprintf("\t\tformVals, formOK := c.Request.MultipartForm.Value[\"%s\"]\n", paramName))
+		fmt.Fprintf(builder, "\t\tformVals, formOK := c.Request.MultipartForm.Value[\"%s\"]\n", paramName)
 		builder.WriteString("\t\tformVal := \"\"\n")
 		builder.WriteString("\t\tif len(formVals) > 0 {\n")
 		builder.WriteString("\t\t\tformVal = formVals[0]\n")
@@ -754,7 +770,7 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 
 		if !isOmitempty {
 			builder.WriteString("\t\tif !formOK {\n")
-			builder.WriteString(fmt.Sprintf("\t\t\treturn errors.New(\"missing required parameter '%s' in form\")\n", paramName))
+			fmt.Fprintf(builder, "\t\t\treturn errors.New(\"missing required parameter '%s' in form\")\n", paramName)
 			builder.WriteString("\t\t}\n")
 		} else {
 			// 处理默认值
@@ -762,7 +778,7 @@ func generateFormBinding(builder *strings.Builder, fieldName, paramName string, 
 			if defaultValue != "" {
 				if isDefaultValueValid(defaultValue, field.Type) {
 					builder.WriteString("\t\tif !formOK {\n")
-					builder.WriteString(fmt.Sprintf("\t\t\tformVal = \"%s\"\n", defaultValue))
+					fmt.Fprintf(builder, "\t\t\tformVal = \"%s\"\n", defaultValue)
 					builder.WriteString("\t\t\tformOK = true\n")
 					builder.WriteString("\t\t}\n")
 				} else {
@@ -819,20 +835,20 @@ func generateValueConversion(builder *strings.Builder, fieldName, valName, param
 	if fieldType.Kind() == reflect.Ptr {
 		// 优先处理实现了 TextUnmarshal 的指针类型，避免生成二次指针赋值
 		if info, ok := getTextUnmarshalInfo(fieldType, currentPkgPath, pkgAliases); ok {
-			builder.WriteString(fmt.Sprintf("%stmpVal := new(%s)\n", indent, info.typeName))
-			builder.WriteString(fmt.Sprintf("%sif err := tmpVal.UnmarshalText([]byte(%s)); err != nil {\n", indent, valName))
-			builder.WriteString(fmt.Sprintf("%s\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", indent, paramName))
-			builder.WriteString(fmt.Sprintf("%s}\n", indent))
-			builder.WriteString(fmt.Sprintf("%s%s = tmpVal\n", indent, fieldName))
+			fmt.Fprintf(builder, "%stmpVal := new(%s)\n", indent, info.typeName)
+			fmt.Fprintf(builder, "%sif err := tmpVal.UnmarshalText([]byte(%s)); err != nil {\n", indent, valName)
+			fmt.Fprintf(builder, "%s\treturn fmt.Errorf(\"invalid parameter '%s': %%v\", err.Error())\n", indent, paramName)
+			fmt.Fprintf(builder, "%s}\n", indent)
+			fmt.Fprintf(builder, "%s%s = tmpVal\n", indent, fieldName)
 			return nil
 		}
 
 		typeName := getTypeNameWithPkg(fieldType.Elem(), currentPkgPath, pkgAliases)
-		builder.WriteString(fmt.Sprintf("%stmpVal := new(%s)\n", indent, typeName))
+		fmt.Fprintf(builder, "%stmpVal := new(%s)\n", indent, typeName)
 		if err := generateValueConversionForType(builder, "*tmpVal", valName, paramName, fieldType.Elem(), indent, currentPkgPath, pkgAliases); err != nil {
 			return err
 		}
-		builder.WriteString(fmt.Sprintf("%s%s = tmpVal\n", indent, fieldName))
+		fmt.Fprintf(builder, "%s%s = tmpVal\n", indent, fieldName)
 		return nil
 	}
 
@@ -925,7 +941,7 @@ func getTextUnmarshalInfo(fieldType reflect.Type, currentPkgPath string, pkgAlia
 		}, true
 	}
 
-	ptrType := reflect.PtrTo(fieldType)
+	ptrType := reflect.PointerTo(fieldType)
 	if ptrType.Implements(bindTextUnmarshalerType) {
 		return textUnmarshalInfo{
 			typeName:           typeName,
@@ -955,6 +971,10 @@ func generateTextUnmarshalConversion(builder *strings.Builder, fieldName, valNam
 
 // 添加一个函数来处理路由组中的所有API
 func processRouterGroup(group *RouterGroup) ([]RouterHandler, error) {
+	if group == nil {
+		return nil, fmt.Errorf("router group is nil")
+	}
+
 	var allAPIs []RouterHandler
 
 	for _, middleware := range group.middlewares {
@@ -990,7 +1010,7 @@ func generateFileContent(pkgPath string, apis []RouterHandler) (string, error) {
 
 	// 写入文件头部
 	builder.WriteString("// Code generated by easygin; DO NOT EDIT.\n\n")
-	builder.WriteString(fmt.Sprintf("package %s\n\n", filepath.Base(pkgPath)))
+	fmt.Fprintf(&builder, "package %s\n\n", filepath.Base(pkgPath))
 
 	// 动态检查使用的包
 	usedImports := map[string]bool{
@@ -1030,9 +1050,9 @@ func generateFileContent(pkgPath string, apis []RouterHandler) (string, error) {
 	// 对API进行去重处理，确保每个类型只处理一次
 	uniqueAPIs := make(map[string]RouterHandler)
 	for _, api := range apis {
-		apiType := reflect.TypeOf(api)
-		if apiType.Kind() == reflect.Ptr {
-			apiType = apiType.Elem()
+		apiType, err := routerHandlerStructType(api)
+		if err != nil {
+			return "", err
 		}
 
 		// 使用类型的全限定名称作为键进行去重
@@ -1052,9 +1072,9 @@ func generateFileContent(pkgPath string, apis []RouterHandler) (string, error) {
 	// 第一遍：收集外部类型包并统计基础包使用（使用默认包名）
 	for _, key := range typeKeys {
 		api := uniqueAPIs[key]
-		apiType := reflect.TypeOf(api)
-		if apiType.Kind() == reflect.Ptr {
-			apiType = apiType.Elem()
+		apiType, err := routerHandlerStructType(api)
+		if err != nil {
+			return "", err
 		}
 
 		method, err := generateBindParametersMethod(apiType, pkgPath, nil)
@@ -1090,9 +1110,9 @@ func generateFileContent(pkgPath string, apis []RouterHandler) (string, error) {
 	var parseMethods strings.Builder
 	for _, key := range typeKeys {
 		api := uniqueAPIs[key]
-		apiType := reflect.TypeOf(api)
-		if apiType.Kind() == reflect.Ptr {
-			apiType = apiType.Elem()
+		apiType, err := routerHandlerStructType(api)
+		if err != nil {
+			return "", err
 		}
 
 		method, err := generateBindParametersMethod(apiType, pkgPath, pkgAliases)
@@ -1111,7 +1131,7 @@ func generateFileContent(pkgPath string, apis []RouterHandler) (string, error) {
 			continue
 		}
 		if usedImports[pkg] {
-			builder.WriteString(fmt.Sprintf("\t\"%s\"\n", pkg))
+			fmt.Fprintf(&builder, "\t\"%s\"\n", pkg)
 		}
 	}
 
@@ -1128,9 +1148,9 @@ func generateFileContent(pkgPath string, apis []RouterHandler) (string, error) {
 				continue
 			}
 			if alias, ok := pkgAliases[pkg]; ok && alias != "" && alias != filepath.Base(pkg) {
-				builder.WriteString(fmt.Sprintf("\t%s \"%s\"\n", alias, pkg))
+				fmt.Fprintf(&builder, "\t%s \"%s\"\n", alias, pkg)
 			} else {
-				builder.WriteString(fmt.Sprintf("\t\"%s\"\n", pkg))
+				fmt.Fprintf(&builder, "\t\"%s\"\n", pkg)
 			}
 		}
 	}
@@ -1240,6 +1260,10 @@ func generateFileForPackage(pkgPath string, apis []RouterHandler) error {
 	if content == "" {
 		return fmt.Errorf("generated empty content for package: %s", pkgPath)
 	}
+	formatted, err := format.Source([]byte(content))
+	if err != nil {
+		return fmt.Errorf("format generated content for package %s: %w", pkgPath, err)
+	}
 
 	// 写入文件
 	filePath := filepath.Join(pkgDir, "zz_easygin_generated.go")
@@ -1250,7 +1274,7 @@ func generateFileForPackage(pkgPath string, apis []RouterHandler) error {
 	}
 
 	// 写入文件
-	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+	if err := writeFileAtomic(filePath, formatted, 0o644); err != nil {
 		return fmt.Errorf("failed to write file: %s, error: %v", filePath, err)
 	}
 
@@ -1365,7 +1389,9 @@ func parseModulePath(goModPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -1473,6 +1499,15 @@ func isDefaultValueValid(defaultValue string, fieldType reflect.Type) bool {
 
 // collectExternalPackages 收集结构体中所有字段的外部包
 func collectExternalPackages(method string, t reflect.Type, imports map[string]bool, pkgAliases map[string]string) {
+	currentPkgPath := ""
+	if t != nil {
+		currentPkgPath = t.PkgPath()
+	}
+	collectExternalPackagesRecursive(method, t, currentPkgPath, imports, pkgAliases, make(map[reflect.Type]bool))
+}
+
+// collectExternalPackagesRecursive 遍历字段类型并通过 visiting 防止递归类型无限展开。
+func collectExternalPackagesRecursive(method string, t reflect.Type, currentPkgPath string, imports map[string]bool, pkgAliases map[string]string, visiting map[reflect.Type]bool) {
 	if t == nil {
 		fmt.Println("Warning: nil type passed to collectExternalPackages")
 		return
@@ -1482,6 +1517,11 @@ func collectExternalPackages(method string, t reflect.Type, imports map[string]b
 		fmt.Printf("Warning: non-struct type passed to collectExternalPackages: %v\n", t)
 		return
 	}
+	if visiting[t] {
+		return
+	}
+	visiting[t] = true
+	defer delete(visiting, t)
 
 	// 检查方法中是否包含特定类型的引用
 	for i := 0; i < t.NumField(); i++ {
@@ -1493,8 +1533,9 @@ func collectExternalPackages(method string, t reflect.Type, imports map[string]b
 			if embedType.Kind() == reflect.Ptr {
 				embedType = embedType.Elem()
 			}
+			addExternalPackageIfUsed(method, embedType, currentPkgPath, imports, pkgAliases)
 			if embedType.Kind() == reflect.Struct {
-				collectExternalPackages(method, embedType, imports, pkgAliases)
+				collectExternalPackagesRecursive(method, embedType, currentPkgPath, imports, pkgAliases, visiting)
 			}
 			continue
 		}
@@ -1512,20 +1553,24 @@ func collectExternalPackages(method string, t reflect.Type, imports map[string]b
 		}
 
 		// 如果是外部包的类型，添加到imports
-		if fieldType.PkgPath() != "" && fieldType.PkgPath() != t.PkgPath() {
-			pkgName := resolveImportAlias(fieldType.PkgPath(), pkgAliases)
-			typeName := pkgName + "." + fieldType.Name()
-
-			// 检查方法中是否包含该类型的引用
-			if strings.Contains(method, typeName) {
-				imports[fieldType.PkgPath()] = true
-			}
-		}
+		addExternalPackageIfUsed(method, fieldType, currentPkgPath, imports, pkgAliases)
 
 		// 如果是结构体，递归检查
 		if fieldType.Kind() == reflect.Struct {
-			collectExternalPackages(method, fieldType, imports, pkgAliases)
+			collectExternalPackagesRecursive(method, fieldType, currentPkgPath, imports, pkgAliases, visiting)
 		}
+	}
+}
+
+// addExternalPackageIfUsed 记录生成方法文本实际引用到的外部命名类型包。
+func addExternalPackageIfUsed(method string, fieldType reflect.Type, currentPkgPath string, imports map[string]bool, pkgAliases map[string]string) {
+	if fieldType.PkgPath() == "" || fieldType.PkgPath() == currentPkgPath || fieldType.Name() == "" {
+		return
+	}
+
+	pkgName := resolveImportAlias(fieldType.PkgPath(), pkgAliases)
+	if strings.Contains(method, pkgName+"."+fieldType.Name()) {
+		imports[fieldType.PkgPath()] = true
 	}
 }
 

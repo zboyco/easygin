@@ -41,6 +41,56 @@ func TestProcessRouterGroupSkipsNoGenParameter(t *testing.T) {
 	assertAPI(t, handlers[3], "child-api")
 }
 
+// TestGenerateBindParametersInitializesEmbeddedPointers 验证生成代码使用完整路径初始化每层嵌入指针。
+func TestGenerateBindParametersInitializesEmbeddedPointers(t *testing.T) {
+	type leaf struct {
+		Name string `in:"query" name:"name"`
+	}
+	type middle struct {
+		*leaf
+	}
+	type handler struct {
+		*middle
+	}
+
+	method, err := generateBindParametersMethod(reflect.TypeOf(handler{}), reflect.TypeOf(handler{}).PkgPath(), nil)
+	if err != nil {
+		t.Fatalf("generateBindParametersMethod returned error: %v", err)
+	}
+	for _, expected := range []string{
+		"if r.middle == nil",
+		"r.middle = new(middle)",
+		"if r.middle.leaf == nil",
+		"r.middle.leaf = new(leaf)",
+		"r.middle.leaf.Name = string(queryVal)",
+	} {
+		if !strings.Contains(method, expected) {
+			t.Fatalf("generated method does not contain %q:\n%s", expected, method)
+		}
+	}
+}
+
+// TestGenerateBindParametersStopsRecursiveEmbedding 验证递归嵌入不会让生成器无限展开。
+func TestGenerateBindParametersStopsRecursiveEmbedding(t *testing.T) {
+	type recursive struct {
+		*recursive
+		Name string `in:"query" name:"name"`
+	}
+	var instance recursive
+	_ = instance.recursive
+
+	method, err := generateBindParametersMethod(reflect.TypeOf(recursive{}), reflect.TypeOf(recursive{}).PkgPath(), nil)
+	if err != nil {
+		t.Fatalf("generateBindParametersMethod returned error: %v", err)
+	}
+	if count := strings.Count(method, "if r.recursive == nil"); count != 1 {
+		t.Fatalf("recursive initializer count = %d, want 1:\n%s", count, method)
+	}
+	if !strings.Contains(method, "r.Name = string(queryVal)") {
+		t.Fatalf("non-recursive field binding is missing:\n%s", method)
+	}
+}
+
 func TestGeneratePathBindingRequired(t *testing.T) {
 	type pathStruct struct {
 		ID int `in:"path" name:"item_id"`

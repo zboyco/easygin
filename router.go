@@ -2,9 +2,35 @@ package easygin
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 
 	"github.com/gin-gonic/gin"
 )
+
+// routerHandlerStructType 返回处理器对应的结构体类型。
+// 处理器可以是命名结构体值或命名结构体指针；nil、typed nil、匿名结构体和非结构体实现会返回错误。
+func routerHandlerStructType(handler RouterHandler) (reflect.Type, error) {
+	if handler == nil {
+		return nil, fmt.Errorf("router handler is nil")
+	}
+
+	t := reflect.TypeOf(handler)
+	if t.Kind() == reflect.Ptr {
+		if reflect.ValueOf(handler).IsNil() {
+			return nil, fmt.Errorf("router handler %s is nil", t)
+		}
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("router handler %T must be a struct or struct pointer", handler)
+	}
+	if t.Name() == "" {
+		return nil, fmt.Errorf("router handler %T must use a named struct type", handler)
+	}
+
+	return t, nil
+}
 
 // R 定义了API响应状态码到响应内容的映射
 // 用于在OpenAPI文档中描述不同状态码对应的响应结构

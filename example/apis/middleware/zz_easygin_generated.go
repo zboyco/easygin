@@ -33,4 +33,3 @@ func (r *MustAuth) EasyGinBindParameters(c *gin.Context) error {
 	}
 	return nil
 }
-

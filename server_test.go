@@ -41,7 +41,9 @@ func TestAnyRouteIsAvailableFromContext(t *testing.T) {
 			c.Request = c.Request.WithContext(ContextWithRoute(c.Request.Context(), mainHandler))
 		}
 	})
-	handleGroup(s.handlerMap, &s.engine.RouterGroup, group)
+	if err := handleGroup(s.handlerMap, &s.engine.RouterGroup, group); err != nil {
+		t.Fatalf("handleGroup returned error: %v", err)
+	}
 
 	recorder := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/any", nil)
@@ -52,6 +54,16 @@ func TestAnyRouteIsAvailableFromContext(t *testing.T) {
 	}
 	if body := recorder.Body.String(); body != "route-ok" {
 		t.Fatalf("body = %q, want %q", body, "route-ok")
+	}
+}
+
+// TestHandleGroupRejectsNilGroup 验证无效路由组会返回错误而不是触发 panic。
+func TestHandleGroupRejectsNilGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	err := handleGroup(make(map[string]RouterAPI), &engine.RouterGroup, nil)
+	if err == nil {
+		t.Fatal("expected nil router group error")
 	}
 }
 

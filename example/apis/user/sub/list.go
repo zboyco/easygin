@@ -12,8 +12,13 @@ func init() {
 
 type ListSub struct {
 	easygin.MethodGet `summary:"Get sub list" `
-	Size              int `in:"query" name:"size,omitempty" default:"10" desc:"Sub Size"`
-	Offset            int `in:"query" name:"offset,omitempty" default:"0" desc:"Sub Offset"`
+	*ListSubQuery
+}
+
+// ListSubQuery 定义列表接口的可选查询参数，并用于验证嵌入指针绑定。
+type ListSubQuery struct {
+	Size   int `in:"query" name:"size,omitempty" default:"10" desc:"Sub Size"`
+	Offset int `in:"query" name:"offset,omitempty" default:"0" desc:"Sub Offset"`
 }
 
 func (ListSub) Path() string {
