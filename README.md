@@ -359,6 +359,97 @@ func main() {
 > `easygin.StdoutSpanExporter()` 方法用于创建一个标准输出的SpanExporter，用于将追踪信息输出到控制台。
 > 如果不使用`easygin.InitGlobalTracerProvider`，可以自定义全局跟踪器的配置，例如指定Trace标准、采样率、采样策略等。
 
+### 服务器安全配置与生命周期
+
+需要在生产环境收紧请求体、错误响应和访问日志时，可以使用 `NewServerWithOptions`：
+
+```go
+package main
+
+import (
+    "time"
+
+    "github.com/zboyco/easygin"
+)
+
+func newProductionServer(serviceName string) (*easygin.Server, error) {
+    return easygin.NewServerWithOptions(
+        serviceName,
+        ":8080",
+        false,
+        // 限制 JSON 和 Multipart 请求体；超限请求返回 HTTP 413。
+        easygin.WithMaxBodyBytes(10*1024*1024),
+        // 普通错误和 5xx easygin.Error 隐藏详情；5xx 状态码及非 5xx 业务响应保持不变。
+        easygin.WithExposeErrorDetails(false),
+        // 无参数时默认移除 token、access_token、authorization、api_key、password。
+        // 也可以传入额外的参数名，例如 WithRedactQueryParameters("signature")。
+        easygin.WithRedactQueryParameters(),
+        // 不允许客户端使用 x-log-level 请求头改变访问日志级别。
+        easygin.WithAllowClientLogLevel(false),
+        // 可选：为 Gin OpenTelemetry 中间件注入指定 Provider。
+        // easygin.WithTracerProvider(provider),
+        easygin.WithHTTPTimeouts(5*time.Second, 15*time.Second, 30*time.Second, 60*time.Second),
+    )
+}
+```
+
+`WithMaxBodyBytes` 同时限制 JSON 和 Multipart 请求。请求在绑定阶段超过限制时返回 `413 Request Entity Too Large`，不会继续执行 API；Multipart 解析产生的临时文件会在请求处理链结束后自动清理。`WithExposeErrorDetails(false)` 会隐藏普通错误、所有 5xx `easygin.Error` 和 panic 文本；有效的 5xx 状态码会保留，响应内容改为对应的标准 HTTP 文本。非 5xx `easygin.Error` 仍按业务状态码、消息和描述输出。
+
+`WithRedactQueryParameters` 只影响访问日志，不会修改 `http.Request.URL`。调用时不传参数会启用常见敏感字段默认列表；传入参数时会在该列表基础上加入自定义字段。日志级别覆盖默认允许 `x-log-level` 请求头，生产环境建议通过 `WithAllowClientLogLevel(false)` 关闭。
+
+如果需要自行管理监听器、测试服务或实现优雅关闭，可以拆开 `Setup`、`Serve` 和 `Shutdown`：
+
+```go
+import (
+    "context"
+    "errors"
+    "net"
+    "net/http"
+    "time"
+
+    "github.com/zboyco/easygin/example/apis"
+)
+
+func runManagedServer() error {
+    srv, err := newProductionServer("srv-example")
+    if err != nil {
+        return err
+    }
+    if err := srv.Setup(apis.RouterRoot); err != nil {
+        return err
+    }
+
+    listener, err := net.Listen("tcp", ":8080")
+    if err != nil {
+        return err
+    }
+
+    serveErr := make(chan error, 1)
+    go func() {
+        serveErr <- srv.Serve(listener)
+    }()
+
+    // 收到退出信号后使用带超时的上下文优雅关闭。
+    shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+    if err := srv.Shutdown(shutdownCtx); err != nil {
+        return err
+    }
+
+    err = <-serveErr
+    if errors.Is(err, http.ErrServerClosed) {
+        return nil
+    }
+    return err
+}
+```
+
+`Setup` 只完成路由和 HTTP Server 准备，不会开始监听或输出“Listening and serving”消息。`Serve(nil)` 使用构造时配置的地址；传入外部 Listener 时，启动日志记录 `listener.Addr()` 返回的真实地址。
+
+`NewServer` 保留旧版本兼容默认值：不限制请求体大小、允许返回普通错误和 5xx `ErrorHttp` 详情、允许客户端日志级别覆盖、不主动注入追踪 Provider，HTTP 超时保持零值。Recovery 始终返回 HTTP 500；兼容模式下 `msg` 保持 `Internal Server Error`，panic 文本位于 `desc`。已有项目无需修改即可继续使用；新项目建议按部署环境显式选择上述安全选项。
+
+Gin 的运行模式是进程级全局状态，并不属于单个 `gin.Engine`。easygin 在包初始化阶段设置兼容的 ReleaseMode 默认值，之后 `NewServer`、`Setup` 和请求处理过程都不会再调用 `gin.SetMode`；应用可以在自身初始化阶段显式选择 DebugMode、ReleaseMode 或 TestMode，创建 Server 不会覆盖该选择。应用仍应避免在服务运行期间并发调用 `gin.SetMode`；`debug` 参数只控制 easygin 的 pprof 注册和自身调试输出。
+
 ## 高级特性
 
 ### 参数标签说明

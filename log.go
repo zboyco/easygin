@@ -3,6 +3,8 @@ package easygin
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,7 +21,7 @@ import (
 //
 // 返回:
 //   - gin.HandlerFunc: Gin 中间件函数
-func middleLogger(serviceName string) gin.HandlerFunc {
+func middleLogger(serviceName string, options serverOptions) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 记录请求开始时间，用于计算请求处理耗时
 		startAt := time.Now()
@@ -45,13 +47,8 @@ func middleLogger(serviceName string) gin.HandlerFunc {
 				span.SetAttributes(attribute.String("handler", handlerName))
 			}
 
-			// 处理日志级别，可通过 x-log-level 请求头自定义
-			var level zerolog.Level
-			_ = level.UnmarshalText([]byte(c.Request.Header.Get("x-log-level")))
-			// 如果未指定日志级别，默认使用 TraceLevel（最详细级别）
-			if level == zerolog.NoLevel {
-				level = zerolog.TraceLevel
-			}
+			// 处理日志级别；生产配置可以禁止客户端通过请求头调整级别。
+			level := requestLogLevel(c.Request.Header, options.allowClientLogLevel)
 
 			// 计算请求处理总耗时
 			duration := time.Since(startAt)
@@ -62,7 +59,7 @@ func middleLogger(serviceName string) gin.HandlerFunc {
 				"remote_ip", c.ClientIP(), // 客户端 IP
 				"cost", duration, // 请求耗时
 				"method", c.Request.Method, // HTTP 方法
-				"request_uri", c.Request.URL.RequestURI(), // 请求 URI
+				"request_uri", redactRequestURI(c.Request.URL, options.redactQueryParameters), // 脱敏后的请求 URI
 				"status", c.Writer.Status(), // HTTP 状态码
 			}
 
@@ -97,6 +94,99 @@ func middleLogger(serviceName string) gin.HandlerFunc {
 		// 调用下一个中间件或处理函数
 		c.Next()
 	}
+}
+
+// requestLogLevel 解析请求日志级别；禁用客户端覆盖时返回最详细的 Trace 级别。
+func requestLogLevel(header http.Header, allowClientOverride bool) zerolog.Level {
+	if !allowClientOverride {
+		return zerolog.TraceLevel
+	}
+	level := zerolog.NoLevel
+	_ = level.UnmarshalText([]byte(header.Get("x-log-level")))
+	if level == zerolog.NoLevel {
+		return zerolog.TraceLevel
+	}
+	return level
+}
+
+// redactRequestURI 返回脱敏后的请求 URI，不修改请求本身。
+func redactRequestURI(rawURL *url.URL, sensitiveNames map[string]struct{}) string {
+	if rawURL == nil {
+		return ""
+	}
+	if len(sensitiveNames) == 0 || rawURL.RawQuery == "" {
+		return rawURL.RequestURI()
+	}
+	if !containsSensitiveQueryParameter(rawURL.RawQuery, sensitiveNames) {
+		return rawURL.RequestURI()
+	}
+
+	values := rawURL.Query()
+	redacted := false
+	for name := range values {
+		if isSensitiveQueryName(name, sensitiveNames) {
+			values.Del(name)
+			redacted = true
+		}
+	}
+	if !redacted {
+		return rawURL.RequestURI()
+	}
+
+	clone := *rawURL
+	clone.RawQuery = values.Encode()
+	return clone.RequestURI()
+}
+
+// containsSensitiveQueryParameter 扫描原始 Query 的参数名，命中前不创建 url.Values。
+// 参数名包含转义字符时使用标准 QueryUnescape，保证与 URL 查询语义一致。
+func containsSensitiveQueryParameter(rawQuery string, sensitiveNames map[string]struct{}) bool {
+	for rawQuery != "" {
+		field := rawQuery
+		if separator := strings.IndexByte(rawQuery, '&'); separator >= 0 {
+			field = rawQuery[:separator]
+			rawQuery = rawQuery[separator+1:]
+		} else {
+			rawQuery = ""
+		}
+		if field == "" {
+			continue
+		}
+
+		key := field
+		if separator := strings.IndexByte(field, '='); separator >= 0 {
+			key = field[:separator]
+		}
+		if key == "" {
+			continue
+		}
+
+		decodedKey := key
+		if strings.ContainsAny(key, "%+") {
+			var err error
+			decodedKey, err = url.QueryUnescape(key)
+			if err != nil {
+				continue
+			}
+		}
+		if isSensitiveQueryName(decodedKey, sensitiveNames) {
+			return true
+		}
+	}
+	return false
+}
+
+// isSensitiveQueryName 以大小写不敏感方式匹配已规范化的敏感参数名称。
+func isSensitiveQueryName(name string, sensitiveNames map[string]struct{}) bool {
+	if _, ok := sensitiveNames[name]; ok {
+		return true
+	}
+	for configuredName := range sensitiveNames {
+		if strings.EqualFold(name, configuredName) {
+			return true
+		}
+	}
+	return false
 }
 
 // NewContextAndLogger 创建一个新的上下文和日志记录器

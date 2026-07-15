@@ -3,15 +3,22 @@ package easygin
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/pprof"
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
+
+// init 在应用进入并发运行前设置兼容默认模式；调用方可在初始化阶段显式覆盖。
+func init() {
+	gin.SetMode(gin.ReleaseMode)
+}
 
 // Server 封装gin.Engine，提供端口和调试模式配置
 // 负责管理HTTP服务器的生命周期和路由注册
@@ -24,6 +31,13 @@ type Server struct {
 	serviceName string // 服务名称，用于标识追踪器
 	addr        string // 监听地址，如":8080"
 	debug       bool   // 调试模式标志，影响日志级别和pprof启用
+
+	options serverOptions
+
+	mu         sync.Mutex
+	httpServer *http.Server
+	prepared   bool
+	settingUp  bool
 }
 
 // NewServer 创建一个新的Server实例
@@ -32,11 +46,32 @@ type Server struct {
 //	addr: 监听地址，默认为":80"
 //	debug: 调试模式，true启用调试功能，false为生产模式
 func NewServer(serviceName, addr string, debug bool) *Server {
+	return newServer(serviceName, addr, debug, defaultServerOptions())
+}
+
+// NewServerWithOptions 创建带可选安全、日志、追踪和生命周期配置的 Server。
+// 配置应用失败时返回错误，且不会创建可运行的服务器实例。
+func NewServerWithOptions(serviceName, addr string, debug bool, options ...ServerOption) (*Server, error) {
+	serverOptions := defaultServerOptions()
+	for _, option := range options {
+		if option == nil {
+			return nil, fmt.Errorf("server option is nil")
+		}
+		if err := option(&serverOptions); err != nil {
+			return nil, err
+		}
+	}
+	return newServer(serviceName, addr, debug, serverOptions), nil
+}
+
+// newServer 创建并初始化内部 Gin 引擎。
+func newServer(serviceName, addr string, debug bool, options serverOptions) *Server {
 	s := &Server{
 		serviceName:      serviceName,
 		addr:             addr,
 		debug:            debug,
 		customMiddleware: make([]gin.HandlerFunc, 0),
+		options:          options,
 	}
 
 	// 设置默认监听地址
@@ -44,8 +79,7 @@ func NewServer(serviceName, addr string, debug bool) *Server {
 		s.addr = ":80"
 	}
 
-	// 创建默认的Gin引擎，包含Logger和Recovery中间件
-	gin.SetMode(gin.ReleaseMode)
+	// 创建默认的Gin引擎，包含Logger和Recovery中间件。
 	s.engine = gin.New()
 
 	return s
@@ -72,13 +106,10 @@ func pprofRegister(e *gin.Engine) {
 	fmt.Println("[EasyGin]     pprof")
 }
 
-// Run 启动HTTP服务器并注册路由组
-// 参数groups为要注册的路由组列表
-// 如果命令行参数包含"gen"，则生成参数绑定函数后退出
-// 如果命令行参数包含"openapi"，则生成OpenAPI文档后退出
+// Run 注册路由组并启动 HTTP 服务器。
+// 命令行参数为 gen 或 openapi 时只执行对应生成任务，不启动监听器。
 func (s *Server) Run(groups ...*RouterGroup) error {
 	args := os.Args
-	// 处理生成参数绑定函数的命令
 	if len(args) > 1 && args[1] == "gen" {
 		if err := GenerateParametersBindFunction(groups...); err != nil {
 			fmt.Fprintf(os.Stderr, "[EasyGin] generate parameters bind failed: %v\n", err)
@@ -86,8 +117,6 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 		}
 		return nil
 	}
-
-	// 处理生成OpenAPI文档的命令
 	if len(args) > 1 && args[1] == "openapi" {
 		if err := GenerateOpenAPI(groups...); err != nil {
 			fmt.Fprintf(os.Stderr, "[EasyGin] generate OpenAPI failed: %v\n", err)
@@ -95,24 +124,61 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 		}
 		return nil
 	}
+	if err := s.Setup(groups...); err != nil {
+		return err
+	}
+	return s.Serve(nil)
+}
 
+// Setup 注册路由和中间件，但不开始监听，适合自定义 Listener、测试和优雅关闭。
+func (s *Server) Setup(groups ...*RouterGroup) error {
+	s.mu.Lock()
+	if s.prepared {
+		s.mu.Unlock()
+		return fmt.Errorf("server is already prepared")
+	}
+	if s.settingUp {
+		s.mu.Unlock()
+		return fmt.Errorf("server setup is already in progress")
+	}
+	s.settingUp = true
+	handlerMap := make(map[string]RouterAPI)
+	customMiddleware := append([]gin.HandlerFunc(nil), s.customMiddleware...)
+	contextInjector := s.contextInjector
+	s.mu.Unlock()
+
+	// 在任何初始化异常下恢复 Setup 状态，避免后续调用永久停留在 settingUp。
+	setupCommitted := false
+	defer func() {
+		if setupCommitted {
+			return
+		}
+		s.mu.Lock()
+		s.settingUp = false
+		s.mu.Unlock()
+	}()
+
+	engine := gin.New()
+
+	// 在本地引擎上完成全部注册，成功后再一次性提交到 Server，避免失败或并发 Setup 污染运行中的状态。
 	// 调试模式下注册pprof路由
 	if s.debug {
 		// 添加pprof接口
-		pprofRegister(s.engine)
+		pprofRegister(engine)
 	}
 
-	// 初始化路由处理器映射
-	s.handlerMap = make(map[string]RouterAPI)
-
-	// 添加OpenTelemetry中间件
-	s.engine.Use(otelgin.Middleware(s.serviceName))
+	// 添加OpenTelemetry中间件；未配置时继续使用全局 Provider。
+	var otelOptions []otelgin.Option
+	if s.options.tracerProvider != nil {
+		otelOptions = append(otelOptions, otelgin.WithTracerProvider(s.options.tracerProvider))
+	}
+	engine.Use(otelgin.Middleware(s.serviceName, otelOptions...))
 
 	// 添加日志中间件
-	s.engine.Use(middleLogger(s.serviceName))
+	engine.Use(middleLogger(s.serviceName, s.options))
 
 	// 添加404处理
-	s.engine.NoRoute(func(c *gin.Context) {
+	engine.NoRoute(func(c *gin.Context) {
 		resp := &gin.H{
 			"code": http.StatusNotFound,
 			"msg":  "404 page not found",
@@ -122,9 +188,9 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 	})
 
 	// 添加请求主路由到上下文中
-	s.engine.Use(func(c *gin.Context) {
+	engine.Use(func(c *gin.Context) {
 		// 定位到主处理函数
-		mainHandler := routeFromHandlerMap(s.handlerMap, c.Request.Method, c.FullPath())
+		mainHandler := routeFromHandlerMap(handlerMap, c.Request.Method, c.FullPath())
 		if mainHandler != nil {
 			// 将路由添加到上下文中，以便后续处理函数使用
 			c.Request = c.Request.WithContext(ContextWithRoute(c.Request.Context(), mainHandler))
@@ -132,7 +198,7 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 	})
 
 	// 添加Gin的Recovery中间件
-	s.engine.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
+	engine.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
 		var e error
 		// 记录错误日志
 		switch v := err.(type) {
@@ -142,34 +208,31 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 			e = fmt.Errorf("%v", err)
 		}
 
-		_ = c.Error(e)
-
-		resp := &gin.H{
-			"code": http.StatusInternalServerError,
-			"msg":  http.StatusText(http.StatusInternalServerError),
-			"desc": e.Error(),
-		}
-		c.AbortWithStatusJSON(http.StatusInternalServerError, resp)
+		handleRecoveryErrorWithPolicy(c, e, s.options.exposeErrorDetails)
 	}))
 
+	if s.options.maxBodyBytes > 0 {
+		engine.Use(maxBodyBytes(s.options.maxBodyBytes))
+	}
+
 	// 在整条请求处理链结束后清理 multipart 临时文件。
-	s.engine.Use(multipartFormCleanup())
+	engine.Use(multipartFormCleanup())
 
 	// 注册自定义的中间件
-	if len(s.customMiddleware) > 0 {
-		s.engine.Use(s.customMiddleware...)
+	if len(customMiddleware) > 0 {
+		engine.Use(customMiddleware...)
 	}
 
 	// 注册上下文注入中间件
-	if s.contextInjector != nil {
-		s.engine.Use(func(c *gin.Context) {
-			c.Request = c.Request.WithContext(s.contextInjector(c.Request.Context()))
+	if contextInjector != nil {
+		engine.Use(func(c *gin.Context) {
+			c.Request = c.Request.WithContext(contextInjector(c.Request.Context()))
 		})
 	}
 
 	// 注册所有路由组
 	for _, group := range groups {
-		if err := handleGroup(s.handlerMap, &s.engine.RouterGroup, group); err != nil {
+		if err := handleGroupWithOptions(handlerMap, &engine.RouterGroup, group, s.options); err != nil {
 			return err
 		}
 	}
@@ -188,18 +251,58 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 		println()
 	}
 
-	// 设置Gin模式为调试模式
-	if s.debug {
-		gin.SetMode(gin.DebugMode)
+	httpServer := &http.Server{
+		Addr:              s.addr,
+		Handler:           engine,
+		ReadHeaderTimeout: s.options.readHeaderTimeout,
+		ReadTimeout:       s.options.readTimeout,
+		WriteTimeout:      s.options.writeTimeout,
+		IdleTimeout:       s.options.idleTimeout,
 	}
 
-	if !s.debug {
-		// 打印服务器启动信息
-		fmt.Printf("[EasyGin] Listening and serving HTTP on %s\n", s.addr)
-	}
+	s.mu.Lock()
+	s.engine = engine
+	s.handlerMap = handlerMap
+	s.httpServer = httpServer
+	s.prepared = true
+	s.settingUp = false
+	setupCommitted = true
+	s.mu.Unlock()
+	return nil
+}
 
-	// 启动HTTP服务器
-	return s.engine.Run(s.addr)
+// Serve 使用已完成 Setup 的路由启动 HTTP 服务；listener 非 nil 时使用外部监听器。
+func (s *Server) Serve(listener net.Listener) error {
+	s.mu.Lock()
+	server := s.httpServer
+	prepared := s.prepared
+	debug := s.debug
+	addr := s.addr
+	s.mu.Unlock()
+	if !prepared || server == nil {
+		return fmt.Errorf("server is not prepared; call Setup first")
+	}
+	if listener != nil {
+		if !debug {
+			fmt.Printf("[EasyGin] Listening and serving HTTP on %s\n", listener.Addr())
+		}
+		return server.Serve(listener)
+	}
+	if !debug {
+		fmt.Printf("[EasyGin] Listening and serving HTTP on %s\n", addr)
+	}
+	return server.ListenAndServe()
+}
+
+// Shutdown 优雅关闭已准备或运行中的 HTTP 服务。
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	server := s.httpServer
+	s.mu.Unlock()
+	if server == nil {
+		return fmt.Errorf("server is not prepared")
+	}
+	return server.Shutdown(ctx)
 }
 
 // handleGroup 递归处理路由组，注册中间件和API
@@ -208,6 +311,11 @@ func (s *Server) Run(groups ...*RouterGroup) error {
 //   - group: 要处理的路由组
 //   - parentMiddlewareNames: 父路由组的中间件名称列表
 func handleGroup(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *RouterGroup, parentMiddlewareNames ...string) error {
+	return handleGroupWithOptions(handlerMap, e, group, defaultServerOptions(), parentMiddlewareNames...)
+}
+
+// handleGroupWithOptions 递归注册路由，并将服务器错误策略传递给各处理器。
+func handleGroupWithOptions(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *RouterGroup, options serverOptions, parentMiddlewareNames ...string) error {
 	if group == nil {
 		return fmt.Errorf("router group is nil")
 	}
@@ -237,7 +345,7 @@ func handleGroup(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *Rou
 		}
 
 		// 处理实现了RouterHandler接口的中间件
-		g.Use(renderMiddleware(handler, handlerName))
+		g.Use(renderMiddlewareWithPolicy(handler, handlerName, options.exposeErrorDetails))
 	}
 
 	// 注册API并收集路由信息
@@ -306,15 +414,15 @@ func handleGroup(handlerMap map[string]RouterAPI, e *gin.RouterGroup, group *Rou
 
 		// 处理实现了RouterHandler接口的API
 		if handler.Method() == "ANY" {
-			g.Any(handler.Path(), renderAPI(handler, handlerName))
+			g.Any(handler.Path(), renderAPIWithPolicy(handler, handlerName, options.exposeErrorDetails))
 			continue
 		}
-		g.Handle(handler.Method(), handler.Path(), renderAPI(handler, handlerName))
+		g.Handle(handler.Method(), handler.Path(), renderAPIWithPolicy(handler, handlerName, options.exposeErrorDetails))
 	}
 
 	// 递归处理子路由组，传递当前路由组的中间件名称
 	for _, sub := range group.children {
-		if err := handleGroup(handlerMap, g, sub, middlewareNames...); err != nil {
+		if err := handleGroupWithOptions(handlerMap, g, sub, options, middlewareNames...); err != nil {
 			return err
 		}
 	}
@@ -389,6 +497,8 @@ func getHandlerDescription(handler RouterHandler) (string, error) {
 // WithGinMiddleware 添加全局Gin中间件
 // 参数middlewares为要添加的Gin中间件列表
 func (s *Server) WithGinMiddleware(middleware ...gin.HandlerFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.customMiddleware = append(s.customMiddleware, middleware...)
 }
 
@@ -396,6 +506,8 @@ func (s *Server) WithGinMiddleware(middleware ...gin.HandlerFunc) {
 // 参数withContext为上下文注入函数，用于在请求处理前修改上下文
 // 返回修改后的Server实例，支持链式调用
 func (s *Server) WithContextInjector(withContext WithContext) *Server {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.contextInjector = withContext
 	return s
 }

@@ -37,14 +37,17 @@
 
 ## 主要函数索引
 
-### 1. handleError
-- 签名: `func handleError(c *gin.Context, err error) `
-- 功能: 统一处理错误响应
+### 1. handleErrorWithPolicy / handleRecoveryErrorWithPolicy / writeInternalServerError
+- 签名: `func handleErrorWithPolicy(c *gin.Context, err error, exposeDetails bool)`
+- 签名: `func handleRecoveryErrorWithPolicy(c *gin.Context, err error, exposeDetails bool)`
+- 签名: `func writeInternalServerError(c *gin.Context, message string)`
+- 功能: 按服务器错误详情策略生成统一错误响应
 - 处理内容:
-  1. 将错误添加到 gin.Context 的 Errors 中
-  2. 检查是否为自定义HTTP错误
-  3. 生成标准格式的错误响应
-  4. 返回适当的HTTP状态码
+  1. 使用 `errors.As` 识别包装后的 `ErrorHttp`；非 5xx 业务错误始终保留业务状态码、消息和描述
+  2. 普通内部错误在关闭详情时返回通用 `500 Internal Server Error`；5xx `ErrorHttp` 保留有效状态码，但消息和描述替换为对应标准 HTTP 文本
+  3. Recovery 无论 panic 值是否实现 `ErrorHttp` 都返回 HTTP 500，不会转换为业务状态码
+  4. Recovery 在关闭详情时隐藏 panic 内容；允许详情时沿用旧版结构，将 panic 文本写入 `desc`
+  5. 原始错误写入 `gin.Context.Errors`，供访问日志和 OpenTelemetry 记录
 
 ### 2. parseTime
 - 签名: `func parseTime(val string, tagName string) (time.Time, error)`
@@ -104,9 +107,19 @@
   3. 遇到可设置的 nil 指针结构体时创建新实例
   4. 无法初始化或索引非法时返回错误，避免反射 panic
 
-### 8. renderAPI
+### 8. multipartFormCleanup / maxBodyBytes
+- 签名: `func multipartFormCleanup() gin.HandlerFunc`
+- 签名: `func maxBodyBytes(limit int64) gin.HandlerFunc`
+- 功能: 管理请求体资源和大小边界
+- 处理内容:
+  1. 使用 `http.MaxBytesReader` 限制 JSON、Multipart 和自定义处理器读取的请求体
+  2. 请求结束后调用 `MultipartForm.RemoveAll` 清理落盘临时文件
+  3. 清理逻辑通过 defer 执行，后续处理器 panic 时仍会运行
+
+### 9. renderAPI / renderAPIWithPolicy
 - 签名: `func renderAPI(h RouterHandler, handlerName string) gin.HandlerFunc`
-- 功能: 处理API请求并生成响应
+- 签名: `func renderAPIWithPolicy(h RouterHandler, handlerName string, exposeErrorDetails bool) gin.HandlerFunc`
+- 功能: 使用指定错误详情策略处理API请求并生成响应
 - 处理内容:
   1. 将handlerName存入context
   2. 调用handleRouter处理请求
@@ -115,23 +128,23 @@
   5. 支持多种响应类型 (JSON, 字符串, 重定向, 文件)
   6. 文件响应通过 `contentDisposition` 设置符合 MIME 参数转义规则的 `Content-Disposition`
 
-### 9. contentDisposition
+### 10. contentDisposition
 - 签名: `func contentDisposition(disposition Disposition, filename string) string`
 - 功能: 生成符合 MIME 参数转义规则的 `Content-Disposition` 响应头
 - 处理内容:
   1. 使用 `mime.FormatMediaType` 组合 disposition 和 filename
   2. 文件名含空格、引号或非 ASCII 字符时生成兼容的转义参数，例如 `filename*`
 
-### 10. renderMiddleware
-- 签名: `func renderMiddleware(h RouterHandler, handlerName string) gin.HandlerFunc`
-- 功能: 处理中间件逻辑
+### 11. renderMiddlewareWithPolicy
+- 签名: `func renderMiddlewareWithPolicy(h RouterHandler, handlerName string, exposeErrorDetails bool) gin.HandlerFunc`
+- 功能: 使用指定错误详情策略处理中间件逻辑
 - 处理内容:
   1. 将handlerName存入context
   2. 调用handleRouter处理请求
   3. 将结果存入请求上下文
   4. 继续处理后续中间件和路由
 
-### 11. renderGinHandler
+### 12. renderGinHandler
 - 签名: `func renderGinHandler(h GinHandler, handlerName string) gin.HandlerFunc`
 - 功能: 处理原生Gin处理器
 - 处理内容:
@@ -139,13 +152,15 @@
   2. 调用GinHandler的GinHandle方法获取原生gin.HandlerFunc
   3. 执行原生处理器函数
 
-### 12. handleRouter
+### 13. handleRouter
 - 签名: `func handleRouter(c *gin.Context, h RouterHandler) (any, error)`
 - 功能: 处理通用的RouterHandler逻辑
 - 处理内容:
   1. 绑定参数
-  2. 将gin.Context添加到context中
-  3. 调用Handler的Output方法
+  2. 使用 `errors.As` 识别错误链中的 `*http.MaxBytesError` 并映射为 HTTP 413
+  3. 其他参数绑定错误映射为 HTTP 400
+  4. 将gin.Context添加到context中
+  5. 调用Handler的Output方法
 
 
 ## 参数绑定流程
@@ -170,6 +185,7 @@
 ### 3. 特殊处理
 - multipart表单: 解析表单数据，处理文件上传；完整请求处理链结束后统一调用 `MultipartForm.RemoveAll` 清理落盘临时文件
 - JSON请求体: 解析JSON数据，支持嵌套结构；连续多个 JSON 值会被 `decodeJSON` 拒绝
+- 请求体上限: 配置 `WithMaxBodyBytes` 后，JSON 和 multipart 读取超限会通过错误链识别并返回 HTTP 413
 - 时间类型: 特殊处理时间格式
 - 指针类型: 缺失的可选参数保持 nil；显式空字符串绑定到 `*string` 时会得到非 nil 的空字符串指针
 - presence 语义: query 使用 `GetQuery` 区分缺失和空值，header 使用请求头 key 是否存在区分缺失和空值；default 只在参数缺失时生效
@@ -243,7 +259,7 @@
 
 ### 错误类型
 - `ErrorHttp`: 自定义HTTP错误接口
-  - `Code()`: 返回HTTP状态码
+  - `StatusCode()`: 返回HTTP状态码
   - `Error()`: 返回错误消息
   - `Desc()`: 返回错误描述
 
@@ -257,6 +273,9 @@
 - 参数类型转换错误
 - 请求体解析错误
 - 内部服务器错误
+- 关闭错误详情时，普通错误返回通用 500，5xx `ErrorHttp` 保留有效状态码并隐藏详情；非 5xx `ErrorHttp` 保留业务响应
+- 请求体超过服务器配置上限时返回 HTTP 413
+- Recovery 始终返回 HTTP 500；关闭错误详情时不会返回 panic 文本或 panic 中的 `ErrorHttp` 详情
 
 ## 上下文处理
 

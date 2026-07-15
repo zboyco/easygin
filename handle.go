@@ -2,6 +2,7 @@ package easygin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -29,27 +30,72 @@ type fieldInfo struct {
 // structFields 缓存结构体的字段信息
 var structFields sync.Map
 
-// handleError 统一处理错误响应
-func handleError(c *gin.Context, err error) {
+// handleErrorWithPolicy 根据错误详情策略生成统一错误响应；关闭详情时会隐藏 5xx ErrorHttp 内容。
+func handleErrorWithPolicy(c *gin.Context, err error, exposeDetails bool) {
+	if err == nil {
+		return
+	}
 	// 将错误添加到 gin.Context 的 Errors 中
 	_ = c.Error(err)
 
-	if errorHttp, ok := err.(ErrorHttp); ok {
-		resp := gin.H{
-			"code": errorHttp.StatusCode(),
-			"msg":  errorHttp.Error(),
-			"desc": errorHttp.Desc(),
+	var errorHttp ErrorHttp
+	if errors.As(err, &errorHttp) {
+		statusCode := errorHttp.StatusCode()
+		if statusCode < http.StatusInternalServerError || exposeDetails {
+			resp := gin.H{
+				"code": statusCode,
+				"msg":  errorHttp.Error(),
+				"desc": errorHttp.Desc(),
+			}
+			c.AbortWithStatusJSON(statusCode, resp)
+			return
 		}
-		c.AbortWithStatusJSON(errorHttp.StatusCode(), resp)
+
+		message := http.StatusText(statusCode)
+		if message == "" {
+			statusCode = http.StatusInternalServerError
+			message = http.StatusText(statusCode)
+		}
+		c.AbortWithStatusJSON(statusCode, gin.H{
+			"code": statusCode,
+			"msg":  message,
+			"desc": message,
+		})
 		return
 	}
 
-	resp := gin.H{
-		"code": 500,
-		"msg":  err.Error(),
-		"desc": "Internal Server Error",
+	message := http.StatusText(http.StatusInternalServerError)
+	if exposeDetails {
+		message = err.Error()
 	}
-	c.AbortWithStatusJSON(500, resp)
+	writeInternalServerError(c, message)
+}
+
+// handleRecoveryErrorWithPolicy 处理 panic；始终返回 500，并在允许时沿用旧版 desc 字段暴露 panic 文本。
+func handleRecoveryErrorWithPolicy(c *gin.Context, err error, exposeDetails bool) {
+	if err == nil {
+		return
+	}
+
+	_ = c.Error(err)
+	description := http.StatusText(http.StatusInternalServerError)
+	if exposeDetails {
+		description = err.Error()
+	}
+	c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+		"code": http.StatusInternalServerError,
+		"msg":  http.StatusText(http.StatusInternalServerError),
+		"desc": description,
+	})
+}
+
+// writeInternalServerError 写入不包含内部错误详情的通用 500 响应。
+func writeInternalServerError(c *gin.Context, message string) {
+	c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+		"code": http.StatusInternalServerError,
+		"msg":  message,
+		"desc": "Internal Server Error",
+	})
 }
 
 // parseTime 统一处理时间格式解析
@@ -280,7 +326,7 @@ func bindParams(c *gin.Context, h RouterHandler) (RouterHandler, error) {
 			if mime == "multipart" {
 				// 使用全局设置的 multipart 表单内存限制
 				if err := c.Request.ParseMultipartForm(GetMultipartMemoryLimit()); err != nil {
-					return nil, fmt.Errorf("parse multipart form failed: %v", err)
+					return nil, fmt.Errorf("parse multipart form failed: %w", err)
 				}
 
 				targetValue := fieldValue
@@ -310,7 +356,7 @@ func bindParams(c *gin.Context, h RouterHandler) (RouterHandler, error) {
 				target = fieldValue.Addr()
 			}
 			if err := decodeJSON(c.Request.Body, target.Interface()); err != nil {
-				return nil, fmt.Errorf("invalid body parameter: %v", err)
+				return nil, fmt.Errorf("invalid body parameter: %w", err)
 			}
 			continue
 		}
@@ -383,15 +429,30 @@ func multipartFormCleanup() gin.HandlerFunc {
 	}
 }
 
+// maxBodyBytes 限制单个请求体的读取大小，超限时由 handleRouter 映射为 413。
+func maxBodyBytes(limit int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request != nil && c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
+		}
+		c.Next()
+	}
+}
+
 // renderAPI 处理API
 func renderAPI(h RouterHandler, handlerName string) gin.HandlerFunc {
+	return renderAPIWithPolicy(h, handlerName, true)
+}
+
+// renderAPIWithPolicy 使用指定错误详情策略处理 API 输出。
+func renderAPIWithPolicy(h RouterHandler, handlerName string, exposeErrorDetails bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 将handlerName存入context
 		c.Request = c.Request.WithContext(ContextWithHandlerName(c.Request.Context(), handlerName))
 
 		output, err := handleRouter(c, h)
 		if err != nil {
-			handleError(c, err)
+			handleErrorWithPolicy(c, err, exposeErrorDetails)
 			return
 		}
 
@@ -469,15 +530,15 @@ func contentDisposition(disposition Disposition, filename string) string {
 	})
 }
 
-// renderMiddleware 处理中间件
-func renderMiddleware(h RouterHandler, handlerName string) gin.HandlerFunc {
+// renderMiddlewareWithPolicy 使用指定错误详情策略处理中间件输出。
+func renderMiddlewareWithPolicy(h RouterHandler, handlerName string, exposeErrorDetails bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 将handlerName存入context
 		c.Request = c.Request.WithContext(ContextWithHandlerName(c.Request.Context(), handlerName))
 
 		output, err := handleRouter(c, h)
 		if err != nil {
-			handleError(c, err)
+			handleErrorWithPolicy(c, err, exposeErrorDetails)
 			return
 		}
 
@@ -503,6 +564,10 @@ func handleRouter(c *gin.Context, h RouterHandler) (any, error) {
 	// 绑定参数
 	newHandler, err := bindParams(c, h)
 	if err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			return nil, NewError(http.StatusRequestEntityTooLarge, http.StatusText(http.StatusRequestEntityTooLarge), "request body exceeds configured limit")
+		}
 		return nil, NewError(http.StatusBadRequest, err.Error(), "invalid parameters")
 	}
 

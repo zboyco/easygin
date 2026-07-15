@@ -37,10 +37,12 @@
 - 签名: `func decodeJSON(r io.Reader, v any) error`
 - 功能: 从请求中解析JSON数据并验证必填字段
 - 流程:
-  1. 使用`json.NewDecoder`解析JSON数据
-  2. 解析后继续读取一个空结构体，只有遇到 `io.EOF` 才表示请求体结束
-  3. 如果存在第二个 JSON 值，返回 `parse json failed: multiple JSON values are not allowed`
-  4. 如果启用了JSON字段验证，调用`ValidateJsonRequiredFieldsWithRaw`按原始 JSON 字段出现情况验证必填字段和默认值
+  1. 使用 `io.ReadAll` 读取请求体，保留原始 JSON 供 presence 校验
+  2. 使用 `json.NewDecoder` 从缓冲内容解析 JSON 数据
+  3. 解析后继续读取一个空结构体，只有遇到 `io.EOF` 才表示请求体结束
+  4. 如果存在第二个 JSON 值，返回 `parse json failed: multiple JSON values are not allowed`
+  5. 如果启用了 JSON 字段验证，调用 `ValidateJsonRequiredFieldsWithRaw` 按原始 JSON 字段出现情况验证必填字段和默认值
+  6. 读取和解析错误使用 `%w` 包装，保留 `http.MaxBytesError` 等底层错误链供上层分类处理
 
 ### 2. ValidateJsonRequiredFields / ValidateJsonRequiredFieldsWithRaw
 - 签名: `func ValidateJsonRequiredFields(v reflect.Value) error`
@@ -159,8 +161,9 @@
 - 缓存键包含包路径和类型名，避免不同包中同名结构体的冲突
 - 减少重复解析标签和结构体的开销
 
-### 内存优化
-- 使用`json.NewDecoder`避免额外的内存分配，并拒绝单个请求体中携带多个连续 JSON 值
+### JSON 解析策略
+- 集中读取请求体以支持原始字段 presence 校验和底层读取错误分类，并拒绝单个请求体中携带多个连续 JSON 值
+- 生产环境可通过 `WithMaxBodyBytes` 限制请求体缓冲上限
 - 预分配切片容量，减少动态扩容
 - 复用已有的结构体实例
 
@@ -174,7 +177,7 @@
 - 类型转换错误
 - 默认值设置错误
 - 文件上传错误
-- JSON 请求体错误：解析失败、非 EOF 尾随内容、连续多个 JSON 值都会以 `parse json failed: ...` 包装返回
+- JSON 请求体错误：解析失败、非 EOF 尾随内容、连续多个 JSON 值都会以 `parse json failed: ...` 包装返回；底层错误通过 `%w` 保留，可由调用方使用 `errors.Is` 或 `errors.As` 检查
 
 ## 特殊类型处理
 - `time.Time`: 按 RFC3339 解析，空字符串作为已提供值时会返回类型转换错误

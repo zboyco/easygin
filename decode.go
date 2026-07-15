@@ -27,18 +27,18 @@ type bodyFieldInfo struct {
 func decodeJSON(r io.Reader, v any) error {
 	body, err := io.ReadAll(r)
 	if err != nil {
-		return fmt.Errorf("read json failed: %v", err)
+		return fmt.Errorf("read json failed: %w", err)
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	if err := decoder.Decode(v); err != nil {
-		return fmt.Errorf("parse json failed: %v", err)
+		return fmt.Errorf("parse json failed: %w", err)
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		if err == nil {
 			return fmt.Errorf("parse json failed: multiple JSON values are not allowed")
 		}
-		return fmt.Errorf("parse json failed: %v", err)
+		return fmt.Errorf("parse json failed: %w", err)
 	}
 
 	if !HandleBodyJsonOmitEmptyAndDefault() {
